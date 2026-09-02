@@ -15,6 +15,15 @@ const scaleValues = computed(() => {
   const max = props.block.input?.max ?? 5;
   return Array.from({ length: Math.max(0, max - min + 1) }, (_, index) => min + index);
 });
+const inputQuestion = computed(() => {
+  const generic = /^(请填写|请作答|回答|作答)$/;
+  const candidates = [props.block.input?.label, props.block.title, props.block.content];
+  return candidates.find((value) => value?.trim() && !generic.test(value.trim()))?.trim()
+    || props.block.input?.label?.trim()
+    || props.block.title?.trim()
+    || props.block.content?.trim()
+    || '请填写';
+});
 
 function commit(): void {
   if (!props.block.input) return;
@@ -49,7 +58,7 @@ function cloneValue(value: InputConfig['value']): InputConfig['value'] {
 
     <fieldset v-if="block.kind === 'input' && block.input" class="cw-input" :disabled="disabled">
       <legend>
-        {{ block.input.label || block.title || '请填写' }}
+        {{ inputQuestion }}
         <span v-if="block.input.required" class="cw-required">必填</span>
       </legend>
 

@@ -31,8 +31,8 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
       recordTokenBudget: 12000,
     },
     prompts: {
-      rules: `这是 {{char}} 与 {{user}} 共同完成的双人问卷。保持 {{char}} 的性格、措辞和关系认知。每次只推进一个自然阶段，不要替 {{user}} 填写。`,
-      opening: `创建 5 道有趣且有关系感的问题，混合使用短答、长答、单选、多选或量表。为每题创建一个交给 User 的 input 卡片，不要在首轮替 User 回答。`,
+      rules: `这是 {{char}} 与 {{user}} 共同完成的双人问卷。保持 {{char}} 的性格、措辞和关系认知。每次只推进一个自然阶段，不要替 {{user}} 填写。每道给 User 的问题都必须是一张 input 卡片，完整题干写入 input.label；title 只写题号，content 留空。`,
+      opening: `创建恰好 5 道有趣且有关系感的问题，混合使用短答、长答、单选、多选或量表。除至多一张简短的 Char 开场 text 卡片外，只创建 5 张交给 User 的 input 卡片。每张 input.label 必须包含完整、具体、可见的题目，不能只写“请填写”“第1题”等泛称，也不能用独立 text 卡片承载题干。单选/多选给出清晰 options，量表给出 min、max 和两端含义。首轮绝不替 User 回答。`,
       continuation: `检查当前记录：如果 User 已回答首轮问题，就让 {{char}} 逐题给出自己的答案，并追加让 User 评价 Char 答案的输入位；如果 User 已完成这些评价，就由 {{char}} 评价 User 的原答案与反馈并将记录标记为完成。否则生成最合适的下一步。`,
     },
   }),
@@ -51,8 +51,8 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
       recordTokenBudget: 12000,
     },
     prompts: {
-      rules: `由 {{char}} 主持一份面向 {{user}} 的问卷。问题应符合角色性格和当前关系，不替 User 作答。`,
-      opening: `以 {{char}} 的口吻生成 5 道问题，允许短答、长答、单选、多选和量表，并全部创建为 User input 卡片。`,
+      rules: `由 {{char}} 主持一份面向 {{user}} 的问卷。问题应符合角色性格和当前关系，不替 User 作答。每道题都必须是一张 input 卡片，完整题干写入 input.label；title 只写题号，content 留空。`,
+      opening: `以 {{char}} 的口吻创建恰好 5 道具体、有角色感的问题。除至多一张简短的 Char 开场 text 卡片外，只创建 5 张 User input 卡片。每张 input.label 必须是完整可见的题目，不能只写“请填写”“请作答”“第几题”，也不能把题干另放在 text 卡片中。题型可混用 short、long、single、multi、scale；single/multi 必须给出清晰 options，scale 必须给 min、max、minLabel、maxLabel。content 留空，绝不替 User 作答。`,
       continuation: `如果 User 已回答，{{char}} 应逐题给出真诚、有角色感的评价，最后写一段总结并标记完成；若仍有未答必填题，只温和提醒，不重复出题。`,
     },
   }),
@@ -71,9 +71,9 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
       recordTokenBudget: 12000,
     },
     prompts: {
-      rules: `这是 {{char}} 与 {{user}} 的交换日记。文字私密、自然、符合角色，不要替 User 写日记。记录可持续多轮，除非 User 主动结束，否则不要标记完成。`,
-      opening: `让 {{char}} 写第一篇日记，可以提到近期相处或一个想对 User 说的话；随后创建一个长文本 input，邀请 User 写下一页。`,
-      continuation: `阅读 User 最新日记，让 {{char}} 先自然回应，再写下一页自己的日记，并创建新的 User 长文本输入位。不要重复已经说过的内容。`,
+      rules: `这是 {{char}} 与 {{user}} 的交换日记。文字私密、自然、符合角色，不要替 User 写日记。记录可持续多轮，除非 User 主动结束，否则不要标记完成。给 User 的书写邀请必须是一张 long input 卡片，完整邀请写入 input.label，content 留空。`,
+      opening: `让 {{char}} 用一张 text 卡片写第一篇日记，可以提到近期相处或一个想对 User 说的话；随后创建一张 long input 卡片邀请 User 写下一页。input.label 要写完整、具体的邀请，不能只写“请填写”。`,
+      continuation: `阅读 User 最新日记，让 {{char}} 先自然回应，再用 text 卡片写下一页自己的日记，并创建新的 long input 卡片邀请 User 接力。input.label 必须完整可见，不要重复已经说过的内容。`,
     },
   }),
 ];

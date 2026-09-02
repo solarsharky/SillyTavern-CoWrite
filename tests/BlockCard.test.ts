@@ -29,4 +29,12 @@ describe('五类 User 输入卡片', () => {
     await wrapper.find('input').trigger('change');
     expect(wrapper.emitted('commit')?.at(-1)).toEqual(['input-short', '这是我的答案']);
   });
+
+  it('模型只给泛化标签时仍显示卡片中的完整题干', () => {
+    const item = block('single');
+    item.title = '如果周末只选一件事，你想和我做什么？';
+    item.input!.label = '请填写';
+    const wrapper = mount(BlockCard, { props: { block: item, characterName: '阿澜' } });
+    expect(wrapper.find('legend').text()).toContain('如果周末只选一件事，你想和我做什么？');
+  });
 });

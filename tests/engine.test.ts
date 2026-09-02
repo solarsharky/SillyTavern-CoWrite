@@ -58,8 +58,27 @@ describe('ActivityEngine 深模块', () => {
   it('摘要失败会阻止主生成和新卡片写入', async () => {
     let record = makeRecord();
     for (let index = 0; index < 5; index += 1) record = applyPatch(record, { complete: false, blocks: [{ key: `a${index}`, kind: 'text', author: 'char', title: '', content: '旧内容', targetIds: [] }] }, 'continuation');
-    const { engine, gateway } = setup({ tokens: 20_000, summarize: async () => { throw new Error('摘要失败'); } });
+    const { engine, gateway, repository } = setup({ tokens: 20_000, summarize: async () => { throw new Error('摘要失败'); } });
     await expect(engine.continue(record)).rejects.toThrow('摘要失败');
     expect(gateway.generatePatch).not.toHaveBeenCalled();
+    expect(repository.saveRecord).not.toHaveBeenCalled();
+  });
+
+  it('读取世界书期间停止也会取消整轮且不保存', async () => {
+    let finishLore!: () => void;
+    const lorePending = new Promise<void>((resolve) => { finishLore = resolve; });
+    const { engine, repository, gateway, tavern } = setup();
+    vi.mocked(tavern.loadManualLore).mockImplementationOnce(async () => {
+      await lorePending;
+      return { content: '', tokenCount: 0, missing: [] };
+    });
+    const request = engine.start(makeTemplate()).catch((error) => error as Error);
+    await vi.waitFor(() => expect(tavern.loadManualLore).toHaveBeenCalledOnce());
+    expect(await engine.stop()).toBe(true);
+    finishLore();
+    const result = await request as Error;
+    expect(result.message).toContain('已停止本轮生成');
+    expect(gateway.generatePatch).not.toHaveBeenCalled();
+    expect(repository.saveRecord).not.toHaveBeenCalled();
   });
 });

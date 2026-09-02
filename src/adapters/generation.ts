@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { jsonrepair } from 'jsonrepair';
 import { GenerationPatchSchema, type ConnectionProfile, type CowriteRecord, type CowriteTemplate, type GenerationPatch } from '../domain/schema';
 import { buildStagePrompt, type GenerationStage } from '../core/prompt';
 import { DEFAULT_PROTOCOL, PATCH_JSON_SCHEMA, SUMMARY_JSON_SCHEMA } from '../core/protocol';
@@ -23,6 +24,8 @@ export interface GenerationGateway {
 
 export class TavernGenerationGateway implements GenerationGateway {
   private activeGenerationId = '';
+  private readonly cancelledGenerationIds = new Set<string>();
+  private activeCancellation: { id: string; cancel: () => void } | null = null;
 
   constructor(private readonly tavern: TavernBridge) {}
 
@@ -30,7 +33,7 @@ export class TavernGenerationGateway implements GenerationGateway {
     const generationId = crypto.randomUUID();
     this.activeGenerationId = generationId;
     const protocol = options.template.advancedProtocol?.trim() || DEFAULT_PROTOCOL;
-    const raw = await withTimeout(this.tavern.helper.generateRaw({
+    const raw = await this.awaitResponse(generationId, this.tavern.helper.generateRaw({
       generation_id: generationId,
       user_input: buildStagePrompt(options.template, options.record, options.stage),
       ordered_prompts: this.orderedPrompts(options.template, protocol, options.manualLore),
@@ -39,13 +42,11 @@ export class TavernGenerationGateway implements GenerationGateway {
       max_chat_history: options.template.context.recentChatCount,
       custom_api: customApi(options.connection, options.apiKey),
       json_schema: PATCH_JSON_SCHEMA,
-    }), GENERATION_TIMEOUT_MS, () => this.tavern.helper.stopGenerationById(generationId)).finally(() => {
-      if (this.activeGenerationId === generationId) this.activeGenerationId = '';
-    });
+    }));
 
     const text = extractContent(raw);
     try {
-      return GenerationPatchSchema.parse(parseJson(text));
+      return parseGenerationPatch(text);
     } catch (error) {
       return await this.repairPatch(text, error, options);
     }
@@ -54,7 +55,7 @@ export class TavernGenerationGateway implements GenerationGateway {
   async summarize(options: Omit<GenerateOptions, 'stage'>, source: string): Promise<string> {
     const generationId = crypto.randomUUID();
     this.activeGenerationId = generationId;
-    const raw = await withTimeout(this.tavern.helper.generateRaw({
+    const raw = await this.awaitResponse(generationId, this.tavern.helper.generateRaw({
       generation_id: generationId,
       user_input: `请把以下共笔早期记录压缩成忠实、可供后续继续写作的摘要。保留关系变化、重要答案、未解决话题和双方语气，不添加新事实。\n\n<record_data>\n${source}\n</record_data>`,
       ordered_prompts: [{ role: 'system', content: '只返回 JSON：{"summary":"..."}。' }, 'user_input'],
@@ -63,16 +64,19 @@ export class TavernGenerationGateway implements GenerationGateway {
       max_chat_history: 0,
       custom_api: customApi(options.connection, options.apiKey),
       json_schema: SUMMARY_JSON_SCHEMA,
-    }), GENERATION_TIMEOUT_MS, () => this.tavern.helper.stopGenerationById(generationId)).finally(() => {
-      if (this.activeGenerationId === generationId) this.activeGenerationId = '';
-    });
+    }));
     const parsed = z.object({ summary: z.string().min(1).max(12000) }).parse(parseJson(extractContent(raw)));
     return parsed.summary;
   }
 
   async stop(): Promise<boolean> {
     if (!this.activeGenerationId) return false;
-    return await this.tavern.helper.stopGenerationById(this.activeGenerationId);
+    const generationId = this.activeGenerationId;
+    this.cancelledGenerationIds.add(generationId);
+    if (this.activeCancellation?.id === generationId) this.activeCancellation.cancel();
+    try { await this.tavern.helper.stopGenerationById(generationId); }
+    catch (error) { console.warn('[CoWrite] 酒馆助手停止请求报错；本地仍会丢弃本轮响应。', error); }
+    return true;
   }
 
   private orderedPrompts(template: CowriteTemplate, protocol: string, manualLore: string): CowriteOrderedPrompt[] {
@@ -91,7 +95,7 @@ export class TavernGenerationGateway implements GenerationGateway {
     const errorText = validationError instanceof Error ? validationError.message : String(validationError);
     const repairId = crypto.randomUUID();
     this.activeGenerationId = repairId;
-    const repaired = await withTimeout(this.tavern.helper.generateRaw({
+    const repaired = await this.awaitResponse(repairId, this.tavern.helper.generateRaw({
       generation_id: repairId,
       user_input: `下列输出无法通过共笔协议。请只修复结构，不改变原意，不补写 User 答案。\n校验错误：${errorText}\n\n原始输出：\n${raw}`,
       ordered_prompts: [{ role: 'system', content: DEFAULT_PROTOCOL }, 'user_input'],
@@ -100,14 +104,37 @@ export class TavernGenerationGateway implements GenerationGateway {
       max_chat_history: 0,
       custom_api: customApi(options.connection, options.apiKey),
       json_schema: PATCH_JSON_SCHEMA,
-    }), GENERATION_TIMEOUT_MS, () => this.tavern.helper.stopGenerationById(repairId)).finally(() => {
-      if (this.activeGenerationId === repairId) this.activeGenerationId = '';
-    });
+    }));
     try {
-      return GenerationPatchSchema.parse(parseJson(extractContent(repaired)));
+      return parseGenerationPatch(extractContent(repaired));
     } catch (repairError) {
       throw new GenerationOutputError('模型两次返回的卡片结构都无效，记录未被修改。', raw, repairError);
     }
+  }
+
+  private async awaitResponse(generationId: string, request: Promise<string | { content: string }>): Promise<string | { content: string }> {
+    const cancellation = new Promise<never>((_, reject) => {
+      this.activeCancellation = { id: generationId, cancel: () => reject(new GenerationStoppedError()) };
+    });
+    try {
+      const response = await withTimeout(Promise.race([request, cancellation]), GENERATION_TIMEOUT_MS, () => this.tavern.helper.stopGenerationById(generationId));
+      if (this.cancelledGenerationIds.has(generationId)) throw new GenerationStoppedError();
+      return response;
+    } catch (error) {
+      if (this.cancelledGenerationIds.has(generationId)) throw new GenerationStoppedError();
+      throw error;
+    } finally {
+      this.cancelledGenerationIds.delete(generationId);
+      if (this.activeCancellation?.id === generationId) this.activeCancellation = null;
+      if (this.activeGenerationId === generationId) this.activeGenerationId = '';
+    }
+  }
+}
+
+export class GenerationStoppedError extends Error {
+  constructor() {
+    super('已停止本轮生成；收到的后续响应已丢弃，记录没有被修改。');
+    this.name = 'GenerationStoppedError';
   }
 }
 
@@ -138,12 +165,62 @@ export function parseJson(text: string): unknown {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try {
     return JSON.parse(trimmed);
-  } catch {
+  } catch (originalError) {
     const start = trimmed.indexOf('{');
     const end = trimmed.lastIndexOf('}');
-    if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1));
-    throw new Error('响应中没有可解析的 JSON 对象');
+    if (start >= 0 && end > start) {
+      try { return JSON.parse(trimmed.slice(start, end + 1)); }
+      catch { /* Continue with tolerant repair below. */ }
+    }
+    try {
+      return JSON.parse(jsonrepair(trimmed));
+    } catch {
+      throw new Error('响应中没有可解析的 JSON 对象', { cause: originalError });
+    }
   }
+}
+
+export function parseGenerationPatch(text: string): GenerationPatch {
+  return GenerationPatchSchema.parse(normalizeGenerationPatch(parseJson(text)));
+}
+
+function normalizeGenerationPatch(input: unknown): unknown {
+  const source = Array.isArray(input) ? { blocks: input, complete: false } : input;
+  if (!source || typeof source !== 'object') return source;
+  const record = source as Record<string, unknown>;
+  const rawBlocks = Array.isArray(record.blocks)
+    ? record.blocks
+    : Array.isArray(record.questions) ? record.questions : undefined;
+  if (!rawBlocks) return source;
+
+  const blocks = rawBlocks.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const block = { ...(item as Record<string, unknown>) };
+    const inputConfig = block.input && typeof block.input === 'object'
+      ? { ...(block.input as Record<string, unknown>) }
+      : undefined;
+    if (block.kind === 'question' && inputConfig) block.kind = 'input';
+    if (block.kind === 'input') block.author = 'user';
+    if (typeof block.content !== 'string') {
+      block.content = typeof block.value === 'string'
+        ? block.value
+        : typeof block.text === 'string' ? block.text : '';
+    }
+    if (inputConfig) {
+      const aliases: Record<string, string> = { text: 'short', textarea: 'long', radio: 'single', checkbox: 'multi' };
+      if (typeof inputConfig.type === 'string' && aliases[inputConfig.type]) inputConfig.type = aliases[inputConfig.type];
+      const label = typeof inputConfig.label === 'string' ? inputConfig.label.trim() : '';
+      if (!label || /^(请填写|请作答|回答|作答)$/.test(label)) {
+        const fallback = [block.question, block.title, block.content]
+          .find((value) => typeof value === 'string' && value.trim() && !/^(请填写|请作答|回答|作答)$/.test(value.trim()));
+        if (typeof fallback === 'string') inputConfig.label = fallback;
+      }
+      delete inputConfig.value;
+      block.input = inputConfig;
+    }
+    return block;
+  });
+  return { ...record, blocks, complete: typeof record.complete === 'boolean' ? record.complete : false };
 }
 
 export async function withTimeout<T>(promise: Promise<T>, milliseconds: number, onTimeout: () => Promise<unknown>): Promise<T> {

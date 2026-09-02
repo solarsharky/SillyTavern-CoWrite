@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 import BlockCard from './components/BlockCard.vue';
 import SettingsPanel from './components/SettingsPanel.vue';
 import TemplateEditor from './components/TemplateEditor.vue';
+import GenerationSetup from './components/GenerationSetup.vue';
 import { cloneBuiltinTemplate } from './domain/defaults';
 import type { CowriteRecord, CowriteTemplate, InputConfig } from './domain/schema';
 import type { WorldbookEntry } from './adapters/tavern';
@@ -18,6 +19,7 @@ const {
 
 const fab = ref<HTMLElement | null>(null);
 const templateEditor = ref<CowriteTemplate | null>(null);
+const generationSetup = ref<{ mode: 'start' | 'continue'; template: CowriteTemplate } | null>(null);
 const templateImport = ref<HTMLInputElement | null>(null);
 const recordImport = ref<HTMLInputElement | null>(null);
 const query = ref('');
@@ -132,6 +134,26 @@ function createTemplate(): void {
   templateEditor.value = draft;
 }
 
+function openGenerationSetup(template: CowriteTemplate, mode: 'start' | 'continue' = 'start'): void {
+  generationSetup.value = { mode, template: cloneJson(template) };
+}
+
+async function confirmGenerationSetup(template: CowriteTemplate): Promise<void> {
+  const mode = generationSetup.value?.mode || 'start';
+  generationSetup.value = null;
+  if (mode === 'continue') await store.continueRecord(template);
+  else await store.start(template);
+}
+
+function worldInfoLabel(template: CowriteTemplate): string {
+  return ({
+    active: '激活世界书',
+    manual: `手选 ${template.context.manualEntries.length} 条`,
+    both: `激活＋手选 ${template.context.manualEntries.length} 条`,
+    off: '不读世界书',
+  })[template.context.worldInfoMode];
+}
+
 async function saveTemplate(template: CowriteTemplate): Promise<void> {
   await store.saveTemplate(template);
   templateEditor.value = null;
@@ -235,7 +257,7 @@ function dateLabel(value: string): string {
 
               <footer class="cw-actionbar">
                 <button v-if="busy" class="cw-button cw-button--danger" @click="store.stopGeneration">停止生成</button>
-                <button v-else-if="selectedRecord.status === 'active'" class="cw-button cw-button--primary" :disabled="!canGenerate" @click="store.continueRecord">{{ selectedRecord.blocks.length ? '继续写一轮' : '重试首轮' }}</button>
+                <button v-else-if="selectedRecord.status === 'active'" class="cw-button cw-button--primary" :disabled="!canGenerate" @click="openGenerationSetup(selectedRecord.templateSnapshot, 'continue')">{{ selectedRecord.blocks.length ? '设置并继续' : '设置并重试' }}</button>
                 <button v-if="unsyncedRecordIds.includes(selectedRecord.id)" class="cw-button cw-button--danger" @click="store.retrySync()">重试同步</button>
                 <button class="cw-button cw-button--quiet" :disabled="busy" @click="store.undo">撤销本轮</button>
                 <button class="cw-button cw-button--quiet" :disabled="busy" @click="store.redo">重做</button>
@@ -250,7 +272,7 @@ function dateLabel(value: string): string {
               <span class="cw-welcome__mark">✦</span><h2>{{ characterId ? `和 ${characterName} 开始一份共笔` : '先打开一个单角色聊天' }}</h2>
               <p>{{ characterId ? '选一个玩法，首轮内容会在独立工作区生成，不会改动聊天楼层。' : '群聊或没有当前角色时仍可到记录库浏览旧记录。' }}</p>
               <div v-if="characterId" class="cw-template-quick">
-                <button v-for="template in templates.slice(0, 3)" :key="template.id" :style="{ '--accent': template.accent }" :disabled="busy" @click="store.start(template)"><span>{{ template.icon }}</span><b>{{ template.name }}</b><small>{{ template.description }}</small></button>
+                <button v-for="template in templates.slice(0, 3)" :key="template.id" :style="{ '--accent': template.accent }" :disabled="busy" @click="openGenerationSetup(template)"><span>{{ template.icon }}</span><b>{{ template.name }}</b><small>{{ template.description }}</small><small>聊天 {{ template.context.recentChatCount || '关闭' }} · {{ worldInfoLabel(template) }}</small></button>
               </div>
             </div>
           </section>
@@ -260,8 +282,8 @@ function dateLabel(value: string): string {
             <div class="cw-template-grid">
               <article v-for="template in sortedTemplates" :key="template.id" class="cw-template-card" :style="{ '--accent': template.accent }">
                 <div class="cw-template-card__top"><span class="cw-template-card__icon">{{ template.icon }}</span><button class="cw-star" :class="{ active: template.starred }" @click="store.toggleTemplateStar(template)">★</button></div>
-                <span class="cw-chip">{{ template.builtin ? '内置' : '自定义' }}</span><h3>{{ template.name }}</h3><p>{{ template.description }}</p>
-                <div class="cw-template-card__actions"><button class="cw-button cw-button--primary" :disabled="!canGenerate" @click="store.start(template)">开始</button><button class="cw-small-btn" @click="openTemplateEditor(template)">{{ template.builtin ? '复制编辑' : '编辑' }}</button><button class="cw-small-btn" @click="store.exportTemplate(template)">导出</button><button v-if="!template.builtin" class="cw-small-btn cw-small-btn--danger" @click="removeTemplate(template)">删除</button></div>
+                <span class="cw-chip">{{ template.builtin ? '内置' : '自定义' }}</span><h3>{{ template.name }}</h3><p>{{ template.description }}</p><p class="cw-context-summary">历史聊天 {{ template.context.recentChatCount || '关闭' }} 条 · {{ worldInfoLabel(template) }}</p>
+                <div class="cw-template-card__actions"><button class="cw-button cw-button--primary" :disabled="!canGenerate" @click="openGenerationSetup(template)">设置并开始</button><button class="cw-small-btn" @click="openTemplateEditor(template)">{{ template.builtin ? '复制编辑' : '编辑' }}</button><button class="cw-small-btn" @click="store.exportTemplate(template)">导出</button><button v-if="!template.builtin" class="cw-small-btn cw-small-btn--danger" @click="removeTemplate(template)">删除</button></div>
               </article>
             </div>
           </section>
@@ -287,8 +309,9 @@ function dateLabel(value: string): string {
           <SettingsPanel v-else />
         </div>
 
-        <div v-if="busy" class="cw-busy"><span class="cw-busy__pen">✒</span><p>正在和 {{ characterName }} 商量下一页…</p></div>
+        <div v-if="busy" class="cw-busy"><span class="cw-busy__pen">✒</span><p>正在和 {{ characterName }} 商量下一页…</p><button class="cw-small-btn cw-small-btn--danger" @click="store.stopGeneration">停止本轮</button></div>
         <div v-if="templateEditor" class="cw-editor-layer"><TemplateEditor :model-value="templateEditor" :connection-options="[{ id: 'default', name: '使用全局默认' }, ...settings.connections.map(item => ({ id: item.id, name: item.name }))]" :prompt-preview="editorPreview" :worldbook-names="worldbookNames" :load-worldbook="loadWorldbook" @save="saveTemplate" @close="templateEditor = null" /></div>
+        <div v-if="generationSetup" class="cw-editor-layer"><GenerationSetup :template="generationSetup.template" :action-label="generationSetup.mode === 'continue' ? '保存设置并继续' : '开始生成'" :connection-options="[{ id: 'default', name: '使用全局默认' }, ...settings.connections.map(item => ({ id: item.id, name: item.name }))]" :worldbook-names="worldbookNames" :load-worldbook="loadWorldbook" @confirm="confirmGenerationSetup" @close="generationSetup = null" /></div>
       </main>
     </div>
   </div>

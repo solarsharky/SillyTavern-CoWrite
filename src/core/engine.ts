@@ -1,4 +1,4 @@
-import type { GenerationGateway, GenerateOptions } from '../adapters/generation';
+import { GenerationStoppedError, type GenerationGateway, type GenerateOptions } from '../adapters/generation';
 import type { RecordRepository, SaveResult } from '../adapters/repository';
 import type { TavernBridge } from '../adapters/tavern';
 import {
@@ -31,6 +31,9 @@ export interface ActivityEngineDependencies {
 }
 
 export class ActivityEngine {
+  private operationActive = false;
+  private stopRequested = false;
+
   constructor(private readonly deps: ActivityEngineDependencies) {}
 
   async start(template: CowriteTemplate): Promise<EngineResult> {
@@ -64,7 +67,10 @@ export class ActivityEngine {
   }
 
   async stop(): Promise<boolean> {
-    return await this.deps.gateway.stop();
+    if (!this.operationActive) return await this.deps.gateway.stop();
+    this.stopRequested = true;
+    await this.deps.gateway.stop();
+    return true;
   }
 
   async updateInput(record: CowriteRecord, blockId: string, value: z.infer<typeof InputValueSchema>): Promise<EngineResult> {
@@ -132,28 +138,42 @@ export class ActivityEngine {
   }
 
   private async runGeneration(source: CowriteRecord, stage: GenerationStage): Promise<EngineResult> {
-    const record = cloneJson(source);
-    const template = record.templateSnapshot;
-    const manualLore = await this.deps.tavern.loadManualLore(template);
-    if (manualLore.tokenCount > template.context.manualLoreTokenBudget) {
-      throw new Error(`手选世界书约 ${manualLore.tokenCount} tokens，超过模板预算 ${template.context.manualLoreTokenBudget}。请减少条目或提高预算。`);
+    this.operationActive = true;
+    this.stopRequested = false;
+    try {
+      const record = cloneJson(source);
+      const template = record.templateSnapshot;
+      const manualLore = await this.deps.tavern.loadManualLore(template);
+      this.assertNotStopped();
+      if (manualLore.tokenCount > template.context.manualLoreTokenBudget) {
+        throw new Error(`手选世界书约 ${manualLore.tokenCount} tokens，超过模板预算 ${template.context.manualLoreTokenBudget}。请减少条目或提高预算。`);
+      }
+      const resolved = this.deps.resolveConnection(template.connectionId);
+      await this.summarizeIfNeeded(record, resolved.profile, resolved.apiKey, manualLore.content);
+      this.assertNotStopped();
+      const patch = await this.deps.gateway.generatePatch({
+        template,
+        record,
+        stage,
+        connection: resolved.profile,
+        apiKey: resolved.apiKey,
+        manualLore: manualLore.content,
+      });
+      this.assertNotStopped();
+      const next = applyPatch(record, patch, stage);
+      const save = await this.deps.repository.saveRecord(next);
+      const warnings: string[] = [];
+      if (manualLore.missing.length) warnings.push(`${manualLore.missing.length} 个世界书条目已缺失或停用，已跳过。`);
+      if (!save.synced) warnings.push(`账户文件未同步：${save.error || '未知错误'}。已保存在浏览器草稿中。`);
+      return { record: next, save, warnings };
+    } finally {
+      this.operationActive = false;
+      this.stopRequested = false;
     }
-    const resolved = this.deps.resolveConnection(template.connectionId);
-    await this.summarizeIfNeeded(record, resolved.profile, resolved.apiKey, manualLore.content);
-    const patch = await this.deps.gateway.generatePatch({
-      template,
-      record,
-      stage,
-      connection: resolved.profile,
-      apiKey: resolved.apiKey,
-      manualLore: manualLore.content,
-    });
-    const next = applyPatch(record, patch, stage);
-    const save = await this.deps.repository.saveRecord(next);
-    const warnings: string[] = [];
-    if (manualLore.missing.length) warnings.push(`${manualLore.missing.length} 个世界书条目已缺失或停用，已跳过。`);
-    if (!save.synced) warnings.push(`账户文件未同步：${save.error || '未知错误'}。已保存在浏览器草稿中。`);
-    return { record: next, save, warnings };
+  }
+
+  private assertNotStopped(): void {
+    if (this.stopRequested) throw new GenerationStoppedError();
   }
 
   private async summarizeIfNeeded(record: CowriteRecord, connection: ConnectionProfile, apiKey: string | undefined, manualLore: string): Promise<void> {
@@ -179,8 +199,6 @@ export class ActivityEngine {
     record.rollingSummary = await this.deps.gateway.summarize(options, source);
     record.summaryThroughCycle = eligible.at(-1)?.id || '';
     record.updatedAt = new Date().toISOString();
-    const saved = await this.deps.repository.saveRecord(record);
-    if (!saved.synced && saved.error) console.warn('[CoWrite] 摘要已缓存但尚未同步：', saved.error);
   }
 
   private assertCanContinue(record: CowriteRecord): void {

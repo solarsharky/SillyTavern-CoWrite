@@ -83,6 +83,9 @@ export const GeneratedBlockSchema = z.object({
   if (block.kind === 'input') {
     if (!block.input) ctx.addIssue({ code: 'custom', message: 'input 卡片缺少配置' });
     if (block.author !== 'user') ctx.addIssue({ code: 'custom', message: 'input 卡片必须交给 user' });
+    if (block.input && (!block.input.label.trim() || /^(请填写|请作答|回答|作答)$/.test(block.input.label.trim()))) {
+      ctx.addIssue({ code: 'custom', path: ['input', 'label'], message: 'input.label 必须包含完整、可见的题干' });
+    }
     if (block.input && ['single', 'multi'].includes(block.input.type) && block.input.options.length === 0) {
       ctx.addIssue({ code: 'custom', path: ['input', 'options'], message: '单选和多选至少需要一个选项' });
     }

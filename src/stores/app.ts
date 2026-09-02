@@ -118,9 +118,14 @@ export const useCowriteStore = defineStore('cowrite', () => {
     });
   }
 
-  async function continueRecord(): Promise<void> {
+  async function continueRecord(templateOverride?: CowriteTemplate): Promise<void> {
     if (!selectedRecord.value) return;
-    await run(async () => applyEngineResult(await engine.continue(selectedRecord.value!)));
+    await run(async () => {
+      const record = templateOverride
+        ? RecordSchema.parse({ ...cloneJson(selectedRecord.value!), templateSnapshot: cloneJson(templateOverride) })
+        : selectedRecord.value!;
+      applyEngineResult(await engine.continue(record));
+    });
   }
 
   async function stopGeneration(): Promise<void> {
