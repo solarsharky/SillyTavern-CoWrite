@@ -1,0 +1,405 @@
+import { computed, reactive, ref } from 'vue';
+import { defineStore } from 'pinia';
+import { GenerationOutputError, TavernGenerationGateway } from '../adapters/generation';
+import { AccountFileRepository, LocalSecretVault } from '../adapters/repository';
+import { TavernBridge, compareVersion } from '../adapters/tavern';
+import { ActivityEngine, type EngineResult } from '../core/engine';
+import { createBackup, downloadText, importBackup, importTemplate, recordToMarkdown } from '../core/backup';
+import { buildPromptPreview } from '../core/prompt';
+import { DEFAULT_PROTOCOL } from '../core/protocol';
+import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS, cloneBuiltinTemplate } from '../domain/defaults';
+import {
+  BackupSchema,
+  ConnectionProfileSchema,
+  RecordSchema,
+  SettingsSchema,
+  TemplateSchema,
+  type ConnectionProfile,
+  type CowriteRecord,
+  type CowriteSettings,
+  type CowriteTemplate,
+  type InputConfig,
+} from '../domain/schema';
+
+export type AppTab = 'current' | 'templates' | 'records' | 'settings';
+
+export const useCowriteStore = defineStore('cowrite', () => {
+  const tavern = new TavernBridge();
+  const repository = new AccountFileRepository();
+  const secrets = new LocalSecretVault();
+  const gateway = new TavernGenerationGateway(tavern);
+
+  const initialized = ref(false);
+  const busy = ref(false);
+  const open = ref(false);
+  const tab = ref<AppTab>('current');
+  const error = ref('');
+  const notices = ref<string[]>([]);
+  const rawOutput = ref('');
+  const records = ref<CowriteRecord[]>([]);
+  const unsyncedRecordIds = ref<string[]>([]);
+  const templates = ref<CowriteTemplate[]>([]);
+  const selectedRecordId = ref('');
+  const characterId = ref('');
+  const characterName = ref('');
+  const helperVersion = ref('未检测');
+  const settings = reactive<CowriteSettings>(structuredClone(DEFAULT_SETTINGS));
+  const sessionKeys = reactive<Record<string, string>>({});
+
+  const engine = new ActivityEngine({
+    repository,
+    gateway,
+    tavern,
+    resolveConnection(id) {
+      const requestedId = id === 'default' ? settings.defaultConnectionId : id;
+      const profile = settings.connections.find((item) => item.id === requestedId)
+        || settings.connections.find((item) => item.id === settings.defaultConnectionId)
+        || settings.connections[0];
+      if (!profile) throw new Error('没有可用的生成连接。');
+      if (profile.type === 'custom' && !sessionKeys[profile.id]) throw new Error(`请先为连接“${profile.name}”填写 API Key。`);
+      return { profile, apiKey: profile.type === 'custom' ? sessionKeys[profile.id] : undefined };
+    },
+  });
+
+  const selectedRecord = computed(() => records.value.find((item) => item.id === selectedRecordId.value) || null);
+  const visibleRecords = computed(() => {
+    const matching = characterId.value ? records.value.filter((item) => item.characterId === characterId.value) : [];
+    const unbound = records.value.filter((item) => !item.characterId);
+    return [...matching, ...unbound];
+  });
+  const canGenerate = computed(() => Boolean(characterId.value) && !busy.value);
+  const customTemplates = computed(() => templates.value.filter((item) => !item.builtin));
+
+  async function initialize(): Promise<void> {
+    if (initialized.value) return;
+    clearMessages();
+    try {
+      tavern.assertCompatible();
+      helperVersion.value = tavern.helper.getTavernHelperVersion();
+      loadSettings();
+      for (const profile of settings.connections) {
+        if (profile.type === 'custom' && profile.rememberKey) sessionKeys[profile.id] = await secrets.get(profile.id);
+      }
+      const [storedTemplates, storedRecords] = await Promise.all([repository.loadTemplates(), repository.loadRecords()]);
+      templates.value = mergeTemplates(storedTemplates);
+      records.value = storedRecords;
+      unsyncedRecordIds.value = await repository.pendingRecordIds();
+      refreshCharacter();
+      selectedRecordId.value = records.value.find((item) => item.characterId === characterId.value && item.status === 'active')?.id || records.value[0]?.id || '';
+      initialized.value = true;
+    } catch (caught) {
+      error.value = errorMessage(caught);
+      templates.value = mergeTemplates([]);
+      initialized.value = true;
+    }
+  }
+
+  function refreshCharacter(): void {
+    try {
+      const character = tavern.currentCharacter();
+      characterId.value = character?.id || '';
+      characterName.value = character?.name || '';
+      const current = selectedRecord.value;
+      if (!current || (character && current.characterId !== character.id)) {
+        selectedRecordId.value = records.value.find((item) => item.characterId === character?.id && item.status === 'active')?.id || '';
+      }
+    } catch {
+      characterId.value = '';
+      characterName.value = '';
+    }
+  }
+
+  async function start(template: CowriteTemplate): Promise<void> {
+    await run(async () => {
+      const prepared = structuredClone(template);
+      applyEngineResult(await engine.start(prepared));
+      tab.value = 'current';
+    });
+  }
+
+  async function continueRecord(): Promise<void> {
+    if (!selectedRecord.value) return;
+    await run(async () => applyEngineResult(await engine.continue(selectedRecord.value!)));
+  }
+
+  async function stopGeneration(): Promise<void> {
+    if (await engine.stop()) notices.value = ['已发送停止请求；本轮不会写入半成品。'];
+  }
+
+  async function commitInput(blockId: string, value: InputConfig['value']): Promise<void> {
+    if (!selectedRecord.value) return;
+    await run(async () => applyEngineResult(await engine.updateInput(selectedRecord.value!, blockId, value)), false);
+  }
+
+  async function undo(): Promise<void> {
+    if (!selectedRecord.value) return;
+    await run(async () => applyEngineResult(await engine.undo(selectedRecord.value!)));
+  }
+
+  async function redo(): Promise<void> {
+    if (!selectedRecord.value) return;
+    await run(async () => applyEngineResult(await engine.redo(selectedRecord.value!)));
+  }
+
+  async function setRecordStatus(status: CowriteRecord['status']): Promise<void> {
+    if (!selectedRecord.value) return;
+    await run(async () => applyEngineResult(await engine.setStatus(selectedRecord.value!, status)), false);
+  }
+
+  async function toggleRecordStar(record = selectedRecord.value): Promise<void> {
+    if (!record) return;
+    await run(async () => applyEngineResult(await engine.toggleStar(record)), false);
+  }
+
+  async function nextVolume(): Promise<void> {
+    if (!selectedRecord.value) return;
+    await run(async () => applyEngineResult(await engine.createNextVolume(selectedRecord.value!)));
+  }
+
+  async function removeRecord(record: CowriteRecord): Promise<void> {
+    const result = await repository.deleteRecord(record.id);
+    records.value = records.value.filter((item) => item.id !== record.id);
+    unsyncedRecordIds.value = unsyncedRecordIds.value.filter((id) => id !== record.id);
+    if (selectedRecordId.value === record.id) selectedRecordId.value = records.value[0]?.id || '';
+    notices.value = [result.synced ? '记录已删除。' : `记录已从本机移除，但账户文件删除失败：${result.error}`];
+  }
+
+  async function retrySync(record = selectedRecord.value): Promise<void> {
+    if (!record) return;
+    const result = await repository.saveRecord(record);
+    if (result.synced) {
+      unsyncedRecordIds.value = unsyncedRecordIds.value.filter((id) => id !== record.id);
+      notices.value = ['记录已同步到账户文件。'];
+    } else {
+      if (!unsyncedRecordIds.value.includes(record.id)) unsyncedRecordIds.value.push(record.id);
+      error.value = `同步仍然失败：${result.error}`;
+    }
+  }
+
+  async function rebindRecord(record: CowriteRecord): Promise<void> {
+    const character = tavern.currentCharacter();
+    if (!character) throw new Error('请先打开要重新绑定的单角色聊天。');
+    const next = RecordSchema.parse({
+      ...structuredClone(record),
+      characterId: character.id,
+      characterName: character.name,
+      updatedAt: new Date().toISOString(),
+    });
+    const result = await repository.saveRecord(next);
+    const index = records.value.findIndex((item) => item.id === next.id);
+    if (index >= 0) records.value[index] = next;
+    notices.value = [result.synced ? `已重新绑定到“${character.name}”。` : `已在本机重新绑定，但尚未同步：${result.error}`];
+  }
+
+  async function saveTemplate(source: CowriteTemplate): Promise<void> {
+    const parsed = TemplateSchema.parse({ ...structuredClone(source), builtin: false, updatedAt: new Date().toISOString() });
+    templates.value = [...templates.value.filter((item) => item.id !== parsed.id), parsed];
+    await persistTemplates();
+    notices.value = ['模板已保存。'];
+  }
+
+  async function duplicateTemplate(source: CowriteTemplate): Promise<CowriteTemplate> {
+    const copy = cloneBuiltinTemplate(source, crypto.randomUUID());
+    await saveTemplate(copy);
+    return copy;
+  }
+
+  async function removeTemplate(template: CowriteTemplate): Promise<void> {
+    if (template.builtin) throw new Error('内置模板不能删除，可以复制后修改。');
+    templates.value = templates.value.filter((item) => item.id !== template.id);
+    await persistTemplates();
+  }
+
+  async function toggleTemplateStar(template: CowriteTemplate): Promise<void> {
+    const ids = new Set(settings.starredTemplateIds);
+    if (ids.has(template.id)) ids.delete(template.id);
+    else ids.add(template.id);
+    settings.starredTemplateIds = [...ids];
+    template.starred = ids.has(template.id);
+    if (!template.builtin) await saveTemplate(template);
+    saveSettings();
+  }
+
+  async function importTemplateJson(text: string): Promise<void> {
+    const template = importTemplate(JSON.parse(text), new Set(templates.value.map((item) => item.id)));
+    await saveTemplate(template);
+  }
+
+  function exportTemplate(template: CowriteTemplate): void {
+    downloadText(`cowrite-template-${safeName(template.name)}.json`, JSON.stringify({ schemaVersion: 1, template }, null, 2));
+  }
+
+  async function saveConnections(nextConnections: ConnectionProfile[]): Promise<void> {
+    const parsed = ConnectionProfileSchema.array().parse(nextConnections);
+    const remainingIds = new Set(parsed.map((item) => item.id));
+    for (const profile of settings.connections) {
+      if (profile.type === 'custom' && !remainingIds.has(profile.id)) {
+        await secrets.delete(profile.id);
+        delete sessionKeys[profile.id];
+      }
+    }
+    settings.connections.splice(0, settings.connections.length, ...parsed);
+    if (!settings.connections.some((item) => item.id === settings.defaultConnectionId)) settings.defaultConnectionId = 'st-main';
+    for (const profile of settings.connections) {
+      if (profile.type !== 'custom') continue;
+      if (profile.rememberKey) await secrets.set(profile.id, sessionKeys[profile.id] || '');
+      else await secrets.delete(profile.id);
+    }
+    saveSettings();
+  }
+
+  async function testConnection(profile: ConnectionProfile): Promise<string[]> {
+    if (profile.type === 'st') return [];
+    const key = sessionKeys[profile.id] || '';
+    return await tavern.helper.getModelList({ apiurl: profile.apiUrl, key });
+  }
+
+  function addConnection(): ConnectionProfile {
+    return {
+      id: crypto.randomUUID(), type: 'custom', name: '新连接', apiUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini',
+      temperature: 0.8, maxTokens: 4096, rememberKey: false,
+    };
+  }
+
+  function exportRecord(record: CowriteRecord, format: 'json' | 'markdown'): void {
+    if (format === 'json') downloadText(`cowrite-record-${safeName(record.title)}.json`, JSON.stringify(record, null, 2));
+    else downloadText(`cowrite-record-${safeName(record.title)}.md`, recordToMarkdown(record), 'text/markdown;charset=utf-8');
+  }
+
+  async function importRecordJson(text: string): Promise<void> {
+    const input = JSON.parse(text) as unknown;
+    const source = RecordSchema.parse(input);
+    const record = structuredClone(source);
+    if (records.value.some((item) => item.id === record.id)) {
+      const previousId = record.id;
+      record.id = crypto.randomUUID();
+      if (record.parentRecordId === previousId) record.parentRecordId = record.id;
+    }
+    record.updatedAt = new Date().toISOString();
+    const result = await repository.saveRecord(record);
+    records.value.unshift(record);
+    selectedRecordId.value = record.id;
+    if (!result.synced) unsyncedRecordIds.value.push(record.id);
+    notices.value = [result.synced ? '记录已导入。' : `记录已导入浏览器草稿，但尚未同步：${result.error}`];
+  }
+
+  function exportBackup(): void {
+    const backup = createBackup(settings, customTemplates.value, records.value);
+    downloadText(`cowrite-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(backup, null, 2));
+  }
+
+  async function restoreBackup(text: string): Promise<void> {
+    const raw = JSON.parse(text) as unknown;
+    const validated = BackupSchema.parse(raw);
+    const imported = importBackup(validated, new Set(templates.value.map((item) => item.id)), new Set(records.value.map((item) => item.id)));
+    for (const record of imported.records) {
+      const result = await repository.saveRecord(record);
+      if (!result.synced && !unsyncedRecordIds.value.includes(record.id)) unsyncedRecordIds.value.push(record.id);
+    }
+    records.value = [...imported.records, ...records.value];
+    templates.value = mergeTemplates([...customTemplates.value, ...imported.templates]);
+    await persistTemplates();
+    Object.assign(settings, SettingsSchema.parse(validated.settings));
+    saveSettings();
+    notices.value = [`已导入 ${imported.records.length} 份记录、${imported.templates.length} 个模板；重映射 ${imported.remapped} 个冲突 ID。`];
+  }
+
+  function exportRawOutput(): void {
+    if (rawOutput.value) downloadText(`cowrite-invalid-output-${Date.now()}.txt`, rawOutput.value, 'text/plain;charset=utf-8');
+  }
+
+  function preview(template: CowriteTemplate): string {
+    return buildPromptPreview(template, selectedRecord.value || undefined);
+  }
+
+  function resetProtocol(template: CowriteTemplate): CowriteTemplate {
+    return { ...structuredClone(template), advancedProtocol: DEFAULT_PROTOCOL };
+  }
+
+  function saveUiPosition(x: number, y: number): void {
+    settings.ui.x = Math.round(x);
+    settings.ui.y = Math.round(y);
+    saveSettings();
+  }
+
+  function saveSettings(): void {
+    const context = tavern.getContext();
+    context.extensionSettings.cowrite = SettingsSchema.parse(structuredClone(settings));
+    context.saveSettingsDebounced();
+  }
+
+  function clearMessages(): void {
+    error.value = '';
+    rawOutput.value = '';
+    notices.value = [];
+  }
+
+  async function run(operation: () => Promise<void>, showBusy = true): Promise<void> {
+    clearMessages();
+    if (showBusy) busy.value = true;
+    try {
+      await operation();
+    } catch (caught) {
+      error.value = errorMessage(caught);
+      if (caught instanceof GenerationOutputError) rawOutput.value = caught.rawOutput;
+    } finally {
+      if (showBusy) busy.value = false;
+    }
+  }
+
+  function applyEngineResult(result: EngineResult): void {
+    const index = records.value.findIndex((item) => item.id === result.record.id);
+    if (index >= 0) records.value[index] = result.record;
+    else records.value.unshift(result.record);
+    selectedRecordId.value = result.record.id;
+    if (result.save.synced) unsyncedRecordIds.value = unsyncedRecordIds.value.filter((id) => id !== result.record.id);
+    else if (!unsyncedRecordIds.value.includes(result.record.id)) unsyncedRecordIds.value.push(result.record.id);
+    notices.value = result.warnings;
+  }
+
+  function loadSettings(): void {
+    const saved = tavern.getContext().extensionSettings.cowrite;
+    const merged = {
+      ...structuredClone(DEFAULT_SETTINGS),
+      ...(saved || {}),
+      ui: { ...DEFAULT_SETTINGS.ui, ...(saved?.ui || {}) },
+      connections: saved?.connections || DEFAULT_SETTINGS.connections,
+    };
+    Object.assign(settings, SettingsSchema.parse(merged));
+  }
+
+  async function persistTemplates(): Promise<void> {
+    const result = await repository.saveTemplates(customTemplates.value);
+    if (!result.synced) notices.value = [`模板未同步到账户文件：${result.error}。已保留在浏览器缓存中。`];
+  }
+
+  function mergeTemplates(stored: CowriteTemplate[]): CowriteTemplate[] {
+    const valid = stored.filter((item) => TemplateSchema.safeParse(item).success && !item.builtin);
+    return [...structuredClone(BUILTIN_TEMPLATES), ...valid].map((item) => ({
+      ...item,
+      starred: settings.starredTemplateIds.includes(item.id) || item.starred,
+    }));
+  }
+
+  return {
+    initialized, busy, open, tab, error, notices, rawOutput, records, unsyncedRecordIds, templates, selectedRecordId,
+    characterId, characterName, helperVersion, settings, sessionKeys, selectedRecord, visibleRecords,
+    canGenerate, customTemplates, initialize, refreshCharacter, start, continueRecord, stopGeneration,
+    commitInput, undo, redo, setRecordStatus, toggleRecordStar, nextVolume, removeRecord, retrySync, rebindRecord, saveTemplate,
+    duplicateTemplate, removeTemplate, toggleTemplateStar, importTemplateJson, exportTemplate, saveConnections, testConnection,
+    addConnection, exportRecord, importRecordJson, exportBackup, restoreBackup, exportRawOutput, preview, resetProtocol,
+    saveUiPosition, saveSettings, clearMessages,
+  };
+});
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function safeName(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, '-').slice(0, 80);
+}
+
+export function isHelperVersionSupported(version: string): boolean {
+  return compareVersion(version, '4.9.3') >= 0;
+}

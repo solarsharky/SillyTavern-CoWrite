@@ -1,0 +1,62 @@
+name: Bug 报告
+description: 报告可复现的问题。提交前请移除 API Key 和私密聊天内容。
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 感谢反馈。请勿上传 API Key、完整角色卡、世界书或未脱敏聊天记录。
+  - type: input
+    id: st-version
+    attributes:
+      label: SillyTavern 版本
+      placeholder: 例如 1.17.0
+    validations:
+      required: true
+  - type: input
+    id: helper-version
+    attributes:
+      label: 酒馆助手版本
+      placeholder: 例如 4.9.3
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: 浏览器与系统
+      placeholder: 例如 Chrome 140 / Windows 11
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: 连接方式
+      options: [跟随 SillyTavern, 独立 OpenAI 兼容连接, 未涉及生成]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请写出从打开共笔开始的具体操作。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 已脱敏日志
+      description: 删除 API Key、URL 查询参数、角色/用户私密文本后再粘贴。
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我已确认内容中不包含 API Key 或不希望公开的角色/聊天数据。
+          required: true

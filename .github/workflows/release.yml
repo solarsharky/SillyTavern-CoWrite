@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: Verify committed build output
+        run: git diff --exit-code -- dist
+      - name: Build install package
+        shell: bash
+        run: |
+          mkdir -p release/SillyTavern-CoWrite/dist
+          cp manifest.json README.md CHANGELOG.md LICENSE release/SillyTavern-CoWrite/
+          cp dist/index.js dist/index.css release/SillyTavern-CoWrite/dist/
+          cd release
+          zip -r ../SillyTavern-CoWrite-${GITHUB_REF_NAME}.zip SillyTavern-CoWrite
+          cd ..
+          sha256sum SillyTavern-CoWrite-${GITHUB_REF_NAME}.zip > SillyTavern-CoWrite-${GITHUB_REF_NAME}.zip.sha256
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then prerelease="--prerelease"; fi
+          gh release create "${GITHUB_REF_NAME}" \
+            "SillyTavern-CoWrite-${GITHUB_REF_NAME}.zip" \
+            "SillyTavern-CoWrite-${GITHUB_REF_NAME}.zip.sha256" \
+            --title "共笔 ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            $prerelease

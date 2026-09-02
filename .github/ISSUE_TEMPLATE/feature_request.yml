@@ -1,0 +1,30 @@
+name: 功能建议
+description: 提议新的玩法、模板、界面或工作流。
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 你想和 Char 一起完成什么？目前为什么不方便？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望的行为
+      description: 描述理想的操作顺序和结果。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 试过的替代方案
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 首版范围确认
+      options:
+        - label: 我知道当前首版只支持单角色，且不会把内容自动写入聊天楼层。
+          required: true
