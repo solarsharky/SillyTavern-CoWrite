@@ -16462,7 +16462,7 @@ const ZS = { class: "cw-settings" }, HS = { class: "cw-paper-section" }, KS = { 
         _("dl", KS, [
           v[5] || (v[5] = _("div", null, [
             _("dt", null, "SillyTavern"),
-            _("dd", null, "需要 1.17.0+")
+            _("dd", null, "需要 1.12.13+")
           ], -1)),
           _("div", null, [
             v[4] || (v[4] = _("dt", null, "酒馆助手", -1)),
@@ -16652,7 +16652,7 @@ const ZS = { class: "cw-settings" }, HS = { class: "cw-paper-section" }, KS = { 
       ]),
       v[23] || (v[23] = _("section", { class: "cw-paper-section" }, [
         _("span", { class: "cw-kicker" }, "ABOUT"),
-        _("h2", null, "共笔 v0.1.0-beta.2"),
+        _("h2", null, "共笔 v0.1.0-beta.3"),
         _("p", null, "作者 SolarShark · MIT License"),
         _("a", {
           href: "https://github.com/solarsharky/SillyTavern-CoWrite/issues",

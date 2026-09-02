@@ -55,7 +55,7 @@ async function restore(event: Event): Promise<void> {
         <span class="cw-status cw-status--ok">已连接</span>
       </div>
       <dl class="cw-dependency-list">
-        <div><dt>SillyTavern</dt><dd>需要 1.17.0+</dd></div>
+        <div><dt>SillyTavern</dt><dd>需要 1.12.13+</dd></div>
         <div><dt>酒馆助手</dt><dd>{{ helperVersion }}（需要 4.9.3+）</dd></div>
       </dl>
       <p class="cw-help">首版仅支持当前单角色。群聊中可以浏览记录，但不能新建或继续生成。</p>
@@ -113,7 +113,7 @@ async function restore(event: Event): Promise<void> {
 
     <section class="cw-paper-section">
       <span class="cw-kicker">ABOUT</span>
-      <h2>共笔 v0.1.0-beta.2</h2>
+      <h2>共笔 v0.1.0-beta.3</h2>
       <p>作者 SolarShark · MIT License</p>
       <a href="https://github.com/solarsharky/SillyTavern-CoWrite/issues" target="_blank" rel="noreferrer">反馈问题或建议 ↗</a>
     </section>
