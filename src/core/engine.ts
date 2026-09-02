@@ -14,6 +14,7 @@ import {
   InputValueSchema,
 } from '../domain/schema';
 import { serializeRecordForModel, type GenerationStage } from './prompt';
+import { cloneJson } from './clone';
 import type { z } from 'zod';
 
 export interface EngineResult {
@@ -41,7 +42,7 @@ export class ActivityEngine {
       id: crypto.randomUUID(),
       title: `${template.name} · ${new Date().toLocaleDateString('zh-CN')}`,
       templateId: template.id,
-      templateSnapshot: structuredClone(template),
+      templateSnapshot: cloneJson(template),
       characterId: character.id,
       characterName: character.name,
       status: 'active',
@@ -67,7 +68,7 @@ export class ActivityEngine {
   }
 
   async updateInput(record: CowriteRecord, blockId: string, value: z.infer<typeof InputValueSchema>): Promise<EngineResult> {
-    const next = structuredClone(record);
+    const next = cloneJson(record);
     const block = next.blocks.find((item) => item.id === blockId);
     if (!block || block.kind !== 'input' || !block.input) throw new Error('找不到可编辑的 User 输入卡片。');
     block.input.value = value;
@@ -76,7 +77,7 @@ export class ActivityEngine {
   }
 
   async undo(record: CowriteRecord): Promise<EngineResult> {
-    const next = structuredClone(record);
+    const next = cloneJson(record);
     const cycle = [...next.cycles].reverse().find((item) => item.status === 'applied');
     if (!cycle) throw new Error('没有可撤销的生成轮次。');
     const blockIds = new Set(cycle.blockSnapshot.map((block) => block.id));
@@ -89,7 +90,7 @@ export class ActivityEngine {
   }
 
   async redo(record: CowriteRecord): Promise<EngineResult> {
-    const next = structuredClone(record);
+    const next = cloneJson(record);
     const cycle = next.cycles.find((item) => item.status === 'undone');
     if (!cycle) throw new Error('没有可重做的生成轮次。');
     const cycleIndex = next.cycles.findIndex((item) => item.id === cycle.id);
@@ -103,19 +104,19 @@ export class ActivityEngine {
   }
 
   async setStatus(record: CowriteRecord, status: CowriteRecord['status']): Promise<EngineResult> {
-    const next = { ...structuredClone(record), status, updatedAt: new Date().toISOString() };
+    const next = { ...cloneJson(record), status, updatedAt: new Date().toISOString() };
     return { record: RecordSchema.parse(next), save: await this.deps.repository.saveRecord(next), warnings: [] };
   }
 
   async toggleStar(record: CowriteRecord): Promise<EngineResult> {
-    const next = { ...structuredClone(record), starred: !record.starred, updatedAt: new Date().toISOString() };
+    const next = { ...cloneJson(record), starred: !record.starred, updatedAt: new Date().toISOString() };
     return { record: RecordSchema.parse(next), save: await this.deps.repository.saveRecord(next), warnings: [] };
   }
 
   async createNextVolume(record: CowriteRecord): Promise<EngineResult> {
     const date = new Date().toISOString();
     const next: CowriteRecord = {
-      ...structuredClone(record),
+      ...cloneJson(record),
       id: crypto.randomUUID(),
       title: `${record.title} · 下一卷`,
       status: 'active',
@@ -131,7 +132,7 @@ export class ActivityEngine {
   }
 
   private async runGeneration(source: CowriteRecord, stage: GenerationStage): Promise<EngineResult> {
-    const record = structuredClone(source);
+    const record = cloneJson(source);
     const template = record.templateSnapshot;
     const manualLore = await this.deps.tavern.loadManualLore(template);
     if (manualLore.tokenCount > template.context.manualLoreTokenBudget) {
@@ -193,7 +194,7 @@ export class ActivityEngine {
 }
 
 export function applyPatch(record: CowriteRecord, patch: GenerationPatch, stage: GenerationStage, date = new Date().toISOString()): CowriteRecord {
-  const next = structuredClone(record);
+  const next = cloneJson(record);
   const cycleId = crypto.randomUUID();
   const keys = patch.blocks.map((block) => block.key);
   if (new Set(keys).size !== keys.length) throw new Error('模型在同一轮返回了重复的卡片 key，记录未被修改。');
@@ -219,7 +220,7 @@ export function applyPatch(record: CowriteRecord, patch: GenerationPatch, stage:
     });
   });
   next.blocks.push(...blocks);
-  next.cycles.push({ id: cycleId, stage, status: 'applied', blockSnapshot: structuredClone(blocks), createdAt: date });
+  next.cycles.push({ id: cycleId, stage, status: 'applied', blockSnapshot: cloneJson(blocks), createdAt: date });
   if (patch.title?.trim()) next.title = patch.title.trim();
   if (patch.complete) next.status = 'completed';
   if (patch.summaryUpdate?.trim()) next.rollingSummary = patch.summaryUpdate.trim();

@@ -1,5 +1,6 @@
 import type { CowriteSettings, CowriteTemplate } from './schema';
 import { SCHEMA_VERSION } from './schema';
+import { cloneJson } from '../core/clone';
 
 const now = '2026-01-01T00:00:00.000Z';
 
@@ -88,7 +89,7 @@ export const DEFAULT_SETTINGS: CowriteSettings = {
 
 export function cloneBuiltinTemplate(source: CowriteTemplate, id: string, date = new Date().toISOString()): CowriteTemplate {
   return {
-    ...structuredClone(source),
+    ...cloneJson(source),
     id,
     name: `${source.name}（副本）`,
     builtin: false,

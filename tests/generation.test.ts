@@ -25,6 +25,7 @@ describe('生成网关', () => {
     await gateway.generatePatch(options());
     expect(generateRaw.mock.calls[0]?.[0].custom_api).toBeUndefined();
     expect(generateRaw.mock.calls[0]?.[0].should_stream).toBe(false);
+    expect(generateRaw.mock.calls[0]?.[0].should_silence).toBe(true);
   });
 
   it('独立连接仅在请求时带上密钥与参数', async () => {

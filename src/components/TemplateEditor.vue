@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { DEFAULT_PROTOCOL } from '../core/protocol';
 import { TemplateSchema, type CowriteTemplate, type ManualLoreEntry } from '../domain/schema';
 import type { WorldbookEntry } from '../adapters/tavern';
+import { cloneJson } from '../core/clone';
 
 const props = defineProps<{
   modelValue: CowriteTemplate;
@@ -13,7 +14,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ save: [template: CowriteTemplate]; close: [] }>();
 
-const draft = ref<CowriteTemplate>(structuredClone(props.modelValue));
+const draft = ref<CowriteTemplate>(cloneJson(props.modelValue));
 const advancedOpen = ref(false);
 const advancedConfirmed = ref(false);
 const selectedBook = ref('');
@@ -22,7 +23,7 @@ const bookCache = ref<Record<string, WorldbookEntry[]>>({});
 const loreBusy = ref(false);
 const editorError = ref('');
 
-watch(() => props.modelValue, (value) => { draft.value = structuredClone(value); }, { deep: true });
+watch(() => props.modelValue, (value) => { draft.value = cloneJson(value); }, { deep: true });
 const isManualLore = computed(() => ['manual', 'both'].includes(draft.value.context.worldInfoMode));
 const estimatedLoreTokens = computed(() => Math.ceil(draft.value.context.manualEntries.reduce((total, selected) => {
   const entry = bookCache.value[selected.bookName]?.find((item) => item.uid === selected.uid);

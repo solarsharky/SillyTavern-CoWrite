@@ -8,6 +8,7 @@ import { cloneBuiltinTemplate } from './domain/defaults';
 import type { CowriteRecord, CowriteTemplate, InputConfig } from './domain/schema';
 import type { WorldbookEntry } from './adapters/tavern';
 import { useCowriteStore, type AppTab } from './stores/app';
+import { cloneJson } from './core/clone';
 
 const store = useCowriteStore();
 const {
@@ -90,16 +91,25 @@ function pointerMove(event: PointerEvent): void {
 
 function pointerUp(event: PointerEvent): void {
   if (!fab.value || event.pointerId !== pointerId) return;
-  let x = fab.value.offsetLeft;
-  const y = fab.value.offsetTop;
-  if (settings.value.ui.edgeTuck) {
-    x = x + fab.value.offsetWidth / 2 < window.innerWidth / 2 ? -fab.value.offsetWidth * .34 : window.innerWidth - fab.value.offsetWidth * .66;
-    fab.value.style.left = `${x}px`;
+  if (moved) {
+    let x = fab.value.offsetLeft;
+    const y = fab.value.offsetTop;
+    if (settings.value.ui.edgeTuck) {
+      x = x + fab.value.offsetWidth / 2 < window.innerWidth / 2 ? -fab.value.offsetWidth * .34 : window.innerWidth - fab.value.offsetWidth * .66;
+      fab.value.style.left = `${x}px`;
+    }
+    store.saveUiPosition(x, y);
   }
-  store.saveUiPosition(x, y);
   fab.value.releasePointerCapture(pointerId);
   pointerId = -1;
-  if (!moved) open.value = !open.value;
+}
+
+function activateFab(): void {
+  if (moved) {
+    moved = false;
+    return;
+  }
+  open.value = !open.value;
 }
 
 function selectTab(value: AppTab): void {
@@ -110,7 +120,7 @@ function selectTab(value: AppTab): void {
 function openTemplateEditor(template: CowriteTemplate): void {
   templateEditor.value = template.builtin
     ? cloneBuiltinTemplate(template, crypto.randomUUID())
-    : structuredClone(template);
+    : cloneJson(template);
 }
 
 function createTemplate(): void {
@@ -180,6 +190,7 @@ function dateLabel(value: string): string {
       @pointerdown="pointerDown"
       @pointermove="pointerMove"
       @pointerup="pointerUp"
+      @click="activateFab"
     ><span>共</span></button>
 
     <div v-if="open" class="cw-backdrop" @mousedown.self="open = false">

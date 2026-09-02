@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useCowriteStore } from '../stores/app';
 import type { ConnectionProfile } from '../domain/schema';
+import { cloneJson } from '../core/clone';
+import { compareVersion } from '../adapters/tavern';
 
 const store = useCowriteStore();
 const { settings, sessionKeys, helperVersion } = storeToRefs(store);
-const connections = ref<ConnectionProfile[]>(structuredClone(settings.value.connections));
+const connections = ref<ConnectionProfile[]>(cloneJson(settings.value.connections));
 const testingId = ref('');
 const testMessage = ref('');
 const importInput = ref<HTMLInputElement | null>(null);
+const helperSupported = computed(() => compareVersion(helperVersion.value, '4.9.3') >= 0);
 
-watch(() => settings.value.connections, (value) => { connections.value = structuredClone(value); }, { deep: true });
+watch(() => settings.value.connections, (value) => { connections.value = cloneJson(value); }, { deep: true });
 
 function add(): void {
   connections.value.push(store.addConnection());
@@ -52,13 +55,14 @@ async function restore(event: Event): Promise<void> {
     <section class="cw-paper-section">
       <div class="cw-section-title">
         <div><span class="cw-kicker">DEPENDENCY</span><h2>依赖状态</h2></div>
-        <span class="cw-status cw-status--ok">已连接</span>
+        <span class="cw-status" :class="helperSupported ? 'cw-status--ok' : 'cw-status--warn'">{{ helperSupported ? '依赖正常' : '需要更新' }}</span>
       </div>
       <dl class="cw-dependency-list">
         <div><dt>SillyTavern</dt><dd>需要 1.12.13+</dd></div>
         <div><dt>酒馆助手</dt><dd>{{ helperVersion }}（需要 4.9.3+）</dd></div>
       </dl>
       <p class="cw-help">首版仅支持当前单角色。群聊中可以浏览记录，但不能新建或继续生成。</p>
+      <p class="cw-notice"><b>独立工作区：</b>问卷、答案、互评和日记只保存在共笔记录中。插件可以读取你选择的聊天上下文供模型参考，但生成结果从不新增或修改聊天楼层。</p>
     </section>
 
     <section class="cw-paper-section">
@@ -113,7 +117,7 @@ async function restore(event: Event): Promise<void> {
 
     <section class="cw-paper-section">
       <span class="cw-kicker">ABOUT</span>
-      <h2>共笔 v0.1.0-beta.4</h2>
+      <h2>共笔 v0.1.0-beta.5</h2>
       <p>作者 SolarShark · MIT License</p>
       <a href="https://github.com/solarsharky/SillyTavern-CoWrite/issues" target="_blank" rel="noreferrer">反馈问题或建议 ↗</a>
     </section>

@@ -8,6 +8,7 @@ import {
   type CowriteSettings,
   type CowriteTemplate,
 } from '../domain/schema';
+import { cloneJson } from './clone';
 
 export interface ImportResult {
   templates: CowriteTemplate[];
@@ -32,7 +33,7 @@ export function importBackup(input: unknown, knownTemplateIds = new Set<string>(
   let remapped = 0;
 
   const templates = backup.templates.map((source) => {
-    const template = structuredClone(source);
+    const template = cloneJson(source);
     if (knownTemplateIds.has(template.id) || templateIdMap.has(template.id)) {
       const nextId = crypto.randomUUID();
       templateIdMap.set(template.id, nextId);
@@ -45,7 +46,7 @@ export function importBackup(input: unknown, knownTemplateIds = new Set<string>(
   });
 
   const records = backup.records.map((source) => {
-    const record = structuredClone(source);
+    const record = cloneJson(source);
     const oldId = record.id;
     if (knownRecordIds.has(oldId) || recordIdMap.has(oldId)) {
       const nextId = crypto.randomUUID();
@@ -68,7 +69,7 @@ export function importBackup(input: unknown, knownTemplateIds = new Set<string>(
 export function importTemplate(input: unknown, existingIds: Set<string>): CowriteTemplate {
   const candidate = isObject(input) && 'template' in input ? input.template : input;
   const template = TemplateSchema.parse(candidate);
-  const next = structuredClone(template);
+  const next = cloneJson(template);
   if (existingIds.has(next.id) || next.builtin) next.id = crypto.randomUUID();
   next.builtin = false;
   next.updatedAt = new Date().toISOString();

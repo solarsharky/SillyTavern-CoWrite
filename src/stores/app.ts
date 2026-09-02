@@ -7,6 +7,7 @@ import { ActivityEngine, type EngineResult } from '../core/engine';
 import { createBackup, downloadText, importBackup, importTemplate, recordToMarkdown } from '../core/backup';
 import { buildPromptPreview } from '../core/prompt';
 import { DEFAULT_PROTOCOL } from '../core/protocol';
+import { cloneJson } from '../core/clone';
 import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS, cloneBuiltinTemplate } from '../domain/defaults';
 import {
   BackupSchema,
@@ -43,7 +44,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
   const characterId = ref('');
   const characterName = ref('');
   const helperVersion = ref('未检测');
-  const settings = reactive<CowriteSettings>(structuredClone(DEFAULT_SETTINGS));
+  const settings = reactive<CowriteSettings>(cloneJson(DEFAULT_SETTINGS));
   const sessionKeys = reactive<Record<string, string>>({});
 
   const engine = new ActivityEngine({
@@ -111,7 +112,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
 
   async function start(template: CowriteTemplate): Promise<void> {
     await run(async () => {
-      const prepared = structuredClone(template);
+      const prepared = cloneJson(template);
       applyEngineResult(await engine.start(prepared));
       tab.value = 'current';
     });
@@ -180,7 +181,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
     const character = tavern.currentCharacter();
     if (!character) throw new Error('请先打开要重新绑定的单角色聊天。');
     const next = RecordSchema.parse({
-      ...structuredClone(record),
+      ...cloneJson(record),
       characterId: character.id,
       characterName: character.name,
       updatedAt: new Date().toISOString(),
@@ -192,7 +193,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
   }
 
   async function saveTemplate(source: CowriteTemplate): Promise<void> {
-    const parsed = TemplateSchema.parse({ ...structuredClone(source), builtin: false, updatedAt: new Date().toISOString() });
+    const parsed = TemplateSchema.parse({ ...cloneJson(source), builtin: false, updatedAt: new Date().toISOString() });
     templates.value = [...templates.value.filter((item) => item.id !== parsed.id), parsed];
     await persistTemplates();
     notices.value = ['模板已保存。'];
@@ -269,7 +270,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
   async function importRecordJson(text: string): Promise<void> {
     const input = JSON.parse(text) as unknown;
     const source = RecordSchema.parse(input);
-    const record = structuredClone(source);
+    const record = cloneJson(source);
     if (records.value.some((item) => item.id === record.id)) {
       const previousId = record.id;
       record.id = crypto.randomUUID();
@@ -313,7 +314,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
   }
 
   function resetProtocol(template: CowriteTemplate): CowriteTemplate {
-    return { ...structuredClone(template), advancedProtocol: DEFAULT_PROTOCOL };
+    return { ...cloneJson(template), advancedProtocol: DEFAULT_PROTOCOL };
   }
 
   function saveUiPosition(x: number, y: number): void {
@@ -324,7 +325,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
 
   function saveSettings(): void {
     const context = tavern.getContext();
-    context.extensionSettings.cowrite = SettingsSchema.parse(structuredClone(settings));
+    context.extensionSettings.cowrite = SettingsSchema.parse(cloneJson(settings));
     context.saveSettingsDebounced();
   }
 
@@ -360,7 +361,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
   function loadSettings(): void {
     const saved = tavern.getContext().extensionSettings.cowrite;
     const merged = {
-      ...structuredClone(DEFAULT_SETTINGS),
+      ...cloneJson(DEFAULT_SETTINGS),
       ...(saved || {}),
       ui: { ...DEFAULT_SETTINGS.ui, ...(saved?.ui || {}) },
       connections: saved?.connections || DEFAULT_SETTINGS.connections,
@@ -375,7 +376,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
 
   function mergeTemplates(stored: CowriteTemplate[]): CowriteTemplate[] {
     const valid = stored.filter((item) => TemplateSchema.safeParse(item).success && !item.builtin);
-    return [...structuredClone(BUILTIN_TEMPLATES), ...valid].map((item) => ({
+    return [...cloneJson(BUILTIN_TEMPLATES), ...valid].map((item) => ({
       ...item,
       starred: settings.starredTemplateIds.includes(item.id) || item.starred,
     }));

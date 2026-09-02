@@ -35,18 +35,8 @@
   transition: transform .18s ease, filter .18s ease, border-radius .18s ease;
 }
 
-.cowrite-settings-launcher {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin: 8px 0;
-  padding: 10px;
-  border: 1px solid var(--SmartThemeBorderColor, rgba(128,128,128,.35));
-  border-radius: 8px;
-  background: var(--black30a, rgba(0,0,0,.12));
-}
-.cowrite-settings-launcher button { min-width: 96px; }
+#cowrite-settings-launcher .inline-drawer-content > p { margin: 8px 0 10px; }
+#cowrite-settings-launcher .menu_button { width: fit-content; }
 .cw-fab:hover { transform: translateY(-2px) rotate(-2deg); filter: brightness(1.08); }
 .cw-fab:active { cursor: grabbing; }
 .cw-fab span { font-size: 25px; font-weight: 700; text-shadow: 0 1px 1px rgba(0,0,0,.25); }
