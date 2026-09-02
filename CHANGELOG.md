@@ -2,6 +2,13 @@
 
 所有重要变更都会记录在这里。本项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## [0.1.0-beta.4] - 2026-09-02
+
+### Fixed
+
+- 修复生产构建残留 `process.env.NODE_ENV`，导致普通浏览器在挂载入口前抛出 `process is not defined` 的问题。
+- 新增直接执行 `dist/index.js` 的发布产物烟雾测试，并禁止浏览器包残留 Node 环境变量引用。
+
 ## [0.1.0-beta.3] - 2026-09-02
 
 ### Fixed

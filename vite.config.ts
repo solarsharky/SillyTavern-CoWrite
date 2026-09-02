@@ -1,8 +1,11 @@
 import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   base: './',
+  define: command === 'build' ? {
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  } : undefined,
   plugins: [vue()],
   build: {
     target: 'es2022',
@@ -26,4 +29,4 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     css: true,
   },
-});
+}));
