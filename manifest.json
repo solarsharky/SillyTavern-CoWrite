@@ -2,6 +2,7 @@
   "display_name": "共笔",
   "name": "CoWrite",
   "description": "与当前角色一起填写问卷、互相评价和交换日记。",
+  "type": "module",
   "loading_order": 120,
   "dependencies": [
     "third-party/JS-Slash-Runner"
@@ -9,7 +10,7 @@
   "js": "dist/index.js",
   "css": "dist/index.css",
   "author": "SolarShark",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "homePage": "https://github.com/solarsharky/SillyTavern-CoWrite",
   "auto_update": true,
   "minimum_client_version": "1.17.0"

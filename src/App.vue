@@ -42,15 +42,23 @@ let dragStart = { x: 0, y: 0, left: 0, top: 0 };
 let moved = false;
 
 onMounted(async () => {
-  await store.initialize();
   await nextTick();
   placeFab();
   window.addEventListener('resize', placeFab);
+  window.addEventListener('cowrite:open', openFromLauncher);
   const context = window.SillyTavern?.getContext();
   const chatChanged = context?.event_types?.CHAT_CHANGED;
   if (chatChanged) context.eventSource?.on(chatChanged, () => store.refreshCharacter());
+  void store.initialize().then(() => placeFab());
 });
-onBeforeUnmount(() => window.removeEventListener('resize', placeFab));
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', placeFab);
+  window.removeEventListener('cowrite:open', openFromLauncher);
+});
+
+function openFromLauncher(): void {
+  open.value = true;
+}
 
 function placeFab(): void {
   if (!fab.value) return;
