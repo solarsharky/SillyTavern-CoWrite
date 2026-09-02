@@ -31,8 +31,10 @@ function setup(overrides: { tokens?: number; summarize?: () => Promise<string> }
 describe('ActivityEngine 深模块', () => {
   it('首轮成功后才一次性保存完整事务', async () => {
     const { engine, repository } = setup();
-    const result = await engine.start(makeTemplate());
+    const result = await engine.start(makeTemplate({ contentTitle: '依恋类型', contentGuidance: '围绕安全感出题。' }));
     expect(result.record.blocks[0]?.content).toBe('生成内容');
+    expect(result.record.title).toContain('依恋类型');
+    expect(result.record.templateSnapshot.contentGuidance).toBe('围绕安全感出题。');
     expect(repository.saveRecord).toHaveBeenCalledOnce();
   });
 

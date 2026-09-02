@@ -10,6 +10,7 @@ describe('插件入口', () => {
     const fab = document.querySelector<HTMLElement>('.cw-fab');
     const launcher = document.querySelector<HTMLButtonElement>('#cowrite-settings-launcher button');
     expect(fab).not.toBeNull();
+    expect(fab?.textContent).toContain('✏️');
     expect(Number.parseFloat(getComputedStyle(fab!).top)).toBeGreaterThanOrEqual(0);
     expect(Number.parseFloat(getComputedStyle(fab!).top)).toBeLessThan(window.innerHeight);
     expect(launcher?.textContent).toBe('打开共笔');
@@ -27,21 +28,23 @@ describe('插件入口', () => {
 
     const tab = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('.cw-tabs button')]
       .find((button) => button.textContent === label);
+    expect([...document.querySelectorAll('.cw-tabs button')].map((button) => button.textContent)).toEqual(['模板库', '当前记录', '记录库', '设置']);
+    tab('当前记录')?.click();
+    await nextTick();
+    expect(document.querySelector('.cw-current-toolbar')?.textContent).toContain('返回记录库');
     tab('模板库')?.click();
     await vi.waitFor(() => expect(document.querySelectorAll('.cw-template-card').length).toBeGreaterThan(0));
-    const setupButton = [...document.querySelectorAll<HTMLButtonElement>('.cw-template-card button')]
-      .find((button) => button.textContent?.includes('设置并开始'));
-    expect(setupButton).toBeDefined();
-    setupButton!.disabled = false;
-    setupButton?.click();
+    expect(document.querySelector('.cw-format-card')?.textContent).toContain('内容');
+    expect(document.querySelector('.cw-format-card')?.textContent).toContain('自由主题');
+    const addContent = [...document.querySelectorAll<HTMLButtonElement>('.cw-format-card button')]
+      .find((button) => button.textContent?.includes('添加内容'));
+    addContent?.click();
     await nextTick();
-    expect(document.querySelector('.cw-generation-setup')?.textContent).toContain('历史聊天');
-    expect(document.querySelector('.cw-generation-setup')?.textContent).toContain('世界书');
-    expect(document.querySelector('.cw-generation-setup')?.textContent).toContain('生成结果仍只写入共笔');
-    document.querySelector<HTMLButtonElement>('.cw-generation-setup .cw-icon-btn')?.click();
+    expect(document.querySelector('.cw-content-item-editor')?.textContent).toContain('这里只描述“写什么”');
+    document.querySelector<HTMLButtonElement>('.cw-content-item-editor .cw-icon-btn')?.click();
     await nextTick();
     const newTemplate = [...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('新模板'));
+      .find((button) => button.textContent?.includes('新分类'));
     newTemplate?.click();
     await nextTick();
     expect(document.querySelector('.cw-editor')).not.toBeNull();
@@ -50,6 +53,8 @@ describe('插件入口', () => {
 
     tab('设置')?.click();
     await nextTick();
+    expect(document.querySelector('.cw-settings')?.textContent).toContain('生成上下文');
+    expect(document.querySelector('.cw-settings')?.textContent).toContain('世界书方式');
     expect(document.querySelector('.cw-settings')?.textContent).toContain('生成连接');
     expect(document.querySelector('.cw-settings')?.textContent).toContain('从不新增或修改聊天楼层');
   });

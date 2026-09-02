@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useCowriteStore } from '../stores/app';
-import type { ConnectionProfile } from '../domain/schema';
+import type { ConnectionProfile, ManualLoreEntry } from '../domain/schema';
 import { cloneJson } from '../core/clone';
-import { compareVersion } from '../adapters/tavern';
+import { compareVersion, type WorldbookEntry } from '../adapters/tavern';
 
 const store = useCowriteStore();
 const { settings, sessionKeys, helperVersion } = storeToRefs(store);
@@ -13,8 +13,70 @@ const testingId = ref('');
 const testMessage = ref('');
 const importInput = ref<HTMLInputElement | null>(null);
 const helperSupported = computed(() => compareVersion(helperVersion.value, '4.9.3') >= 0);
+const selectedBook = ref('');
+const entries = ref<WorldbookEntry[]>([]);
+const bookCache = ref<Record<string, WorldbookEntry[]>>({});
+const loreBusy = ref(false);
+const contextMessage = ref('');
+const worldbookNames = computed(() => {
+  try { return window.TavernHelper?.getWorldbookNames() || []; } catch { return []; }
+});
+const isManualLore = computed(() => ['manual', 'both'].includes(settings.value.generationContext.worldInfoMode));
+const estimatedLoreTokens = computed(() => Math.ceil(settings.value.generationContext.manualEntries.reduce((total, selected) => {
+  const entry = bookCache.value[selected.bookName]?.find((item) => item.uid === selected.uid);
+  return total + (entry?.enabled ? entry.content.length : 0);
+}, 0) / 3));
 
 watch(() => settings.value.connections, (value) => { connections.value = cloneJson(value); }, { deep: true });
+
+onMounted(async () => {
+  const books = [...new Set(settings.value.generationContext.manualEntries.map((item) => item.bookName))];
+  await Promise.all(books.map(async (name) => {
+    try { bookCache.value[name] = await loadWorldbook(name); } catch { bookCache.value[name] = []; }
+  }));
+});
+
+async function loadWorldbook(name: string): Promise<WorldbookEntry[]> {
+  return await window.TavernHelper?.getWorldbook(name) as WorldbookEntry[] || [];
+}
+
+async function selectBook(): Promise<void> {
+  if (!selectedBook.value) {
+    entries.value = [];
+    return;
+  }
+  loreBusy.value = true;
+  contextMessage.value = '';
+  try {
+    entries.value = await loadWorldbook(selectedBook.value);
+    bookCache.value[selectedBook.value] = entries.value;
+  } catch (caught) {
+    entries.value = [];
+    contextMessage.value = caught instanceof Error ? caught.message : String(caught);
+  } finally { loreBusy.value = false; }
+}
+
+function isSelected(entry: WorldbookEntry): boolean {
+  return settings.value.generationContext.manualEntries.some((item) => item.bookName === selectedBook.value && item.uid === entry.uid);
+}
+
+function toggleEntry(entry: WorldbookEntry): void {
+  const selected: ManualLoreEntry = { bookName: selectedBook.value, uid: entry.uid, name: entry.name || `条目 ${entry.uid}` };
+  const list = settings.value.generationContext.manualEntries;
+  const index = list.findIndex((item) => item.bookName === selected.bookName && item.uid === selected.uid);
+  if (index >= 0) list.splice(index, 1);
+  else list.push(selected);
+}
+
+function saveContext(): void {
+  contextMessage.value = '';
+  try {
+    store.saveSettings();
+    contextMessage.value = '上下文设置已保存，之后所有分类和记录都会使用它。';
+  } catch (caught) {
+    contextMessage.value = caught instanceof Error ? caught.message : String(caught);
+  }
+}
 
 function add(): void {
   connections.value.push(store.addConnection());
@@ -66,6 +128,45 @@ async function restore(event: Event): Promise<void> {
     </section>
 
     <section class="cw-paper-section">
+      <div class="cw-section-title"><div><span class="cw-kicker">CONTEXT</span><h2>生成上下文</h2></div></div>
+      <p>这里是全局设置，之后从任何格式分类开始或继续记录时都会使用；无需在模板里重复选择。</p>
+      <div class="cw-form-grid">
+        <label>近期聊天条数
+          <input v-model.number="settings.generationContext.recentChatCount" class="cw-field" type="number" min="0" max="100" />
+          <small>填 0 表示不读取聊天历史。</small>
+        </label>
+        <label>世界书方式
+          <select v-model="settings.generationContext.worldInfoMode" class="cw-field">
+            <option value="active">当前激活世界书</option>
+            <option value="manual">仅手选条目</option>
+            <option value="both">当前激活＋手选条目</option>
+            <option value="off">不使用世界书</option>
+          </select>
+        </label>
+        <label>长记录预算（tokens）<input v-model.number="settings.generationContext.recordTokenBudget" class="cw-field" type="number" min="1000" max="200000" /></label>
+        <label v-if="isManualLore">手选世界书预算（tokens）<input v-model.number="settings.generationContext.manualLoreTokenBudget" class="cw-field" type="number" min="0" max="50000" /></label>
+      </div>
+      <p v-if="['active', 'both'].includes(settings.generationContext.worldInfoMode)" class="cw-help">当前激活世界书会通过 SillyTavern 原生的 world_info_before / world_info_after 位置读取。</p>
+      <div v-if="isManualLore" class="cw-lore-picker">
+        <select v-model="selectedBook" class="cw-field" @change="selectBook">
+          <option value="">选择世界书…</option>
+          <option v-for="name in worldbookNames" :key="name" :value="name">{{ name }}</option>
+        </select>
+        <p v-if="worldbookNames.length === 0" class="cw-warning">没有读取到可用世界书，请确认酒馆助手和当前聊天的世界书设置。</p>
+        <p v-else-if="loreBusy">正在读取条目…</p>
+        <template v-else>
+          <label v-for="entry in entries" :key="entry.uid" class="cw-lore-row" :class="{ 'is-disabled': !entry.enabled }">
+            <input type="checkbox" :checked="isSelected(entry)" :disabled="!entry.enabled" @change="toggleEntry(entry)" />
+            <span>{{ entry.name || `条目 ${entry.uid}` }}</span>
+          </label>
+        </template>
+        <small>已选 {{ settings.generationContext.manualEntries.length }} 条；已读取内容约 {{ estimatedLoreTokens }} tokens。停用或删除的条目会在生成前过滤。</small>
+      </div>
+      <div class="cw-inline-actions"><button class="cw-button cw-button--primary" @click="saveContext">保存上下文设置</button></div>
+      <p v-if="contextMessage" class="cw-help">{{ contextMessage }}</p>
+    </section>
+
+    <section class="cw-paper-section">
       <div class="cw-section-title">
         <div><span class="cw-kicker">CONNECTIONS</span><h2>生成连接</h2></div>
         <button class="cw-small-btn" @click="add">＋ 新连接</button>
@@ -107,17 +208,18 @@ async function restore(event: Event): Promise<void> {
 
     <section class="cw-paper-section">
       <div class="cw-section-title"><div><span class="cw-kicker">BACKUP</span><h2>备份与恢复</h2></div></div>
-      <p>整库备份包含自定义模板、记录和不含密钥的设置。建议在批量整理或更新前下载一份。</p>
+      <p>整库备份包含格式分类、内容项、记录和不含密钥的设置。建议在批量整理或更新前下载一份。</p>
       <div class="cw-inline-actions">
         <button class="cw-button cw-button--quiet" @click="store.exportBackup">下载整库备份</button>
         <button class="cw-button cw-button--quiet" @click="importInput?.click()">从备份恢复</button>
         <input ref="importInput" class="cw-hidden" type="file" accept="application/json,.json" @change="restore" />
+        <button class="cw-button cw-button--quiet" @click="store.restoreBuiltinTemplates">恢复内置格式分类</button>
       </div>
     </section>
 
     <section class="cw-paper-section">
       <span class="cw-kicker">ABOUT</span>
-      <h2>共笔 v0.1.0-beta.6</h2>
+      <h2>共笔 v0.1.0-beta.7</h2>
       <p>作者 SolarShark · MIT License</p>
       <a href="https://github.com/solarsharky/SillyTavern-CoWrite/issues" target="_blank" rel="noreferrer">反馈问题或建议 ↗</a>
     </section>

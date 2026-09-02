@@ -4,11 +4,13 @@ import { cloneJson } from '../core/clone';
 
 const now = '2026-01-01T00:00:00.000Z';
 
-function template(input: Omit<CowriteTemplate, 'schemaVersion' | 'builtin' | 'starred' | 'createdAt' | 'updatedAt'>): CowriteTemplate {
+function template(input: Omit<CowriteTemplate, 'schemaVersion' | 'builtin' | 'starred' | 'contentGuidance' | 'contentTitle' | 'createdAt' | 'updatedAt'>): CowriteTemplate {
   return {
     schemaVersion: SCHEMA_VERSION,
     builtin: true,
     starred: false,
+    contentGuidance: '',
+    contentTitle: '',
     createdAt: now,
     updatedAt: now,
     ...input,
@@ -22,6 +24,12 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
     description: '双方依次回答并评价彼此答案。',
     icon: '💞',
     accent: '#b85c74',
+    contentItems: [
+      { id: 'shared-free', name: '自由主题', description: '根据角色和当前关系自然出题。', guidance: '' },
+      { id: 'shared-attachment', name: '依恋类型', description: '探索亲密关系中的依恋与安全感。', guidance: '围绕依恋类型、亲密关系模式与安全感设计问题。不要直接下心理诊断结论。' },
+      { id: 'shared-zodiac', name: '星座与相处', description: '聊星座、性格和两人的相处方式。', guidance: '围绕星座、性格印象和两人的相处方式设计内容，保持轻松有角色感。' },
+      { id: 'shared-nsfw', name: '私密 / NSFW', description: '更私密、更成人向的双人问题。', guidance: '本轮可以更私密、更成人向，同时保持角色设定、双方边界和自然措辞。' },
+    ],
     connectionId: 'default',
     context: {
       recentChatCount: 12,
@@ -42,6 +50,11 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
     description: 'Char 出题，User 作答，Char 再逐题评价。',
     icon: '📋',
     accent: '#8f6f3e',
+    contentItems: [
+      { id: 'char-free', name: '自由主题', description: '由 Char 按照性格自由出题。', guidance: '' },
+      { id: 'char-understanding', name: '你真的了解我吗', description: '由 Char 测试 User 对自己的了解。', guidance: '问题围绕 User 是否真正了解 Char 的习惯、偏好、经历和情绪反应。' },
+      { id: 'char-relationship', name: '关系小测验', description: '聚焦双方关系和相处细节。', guidance: '围绕两人的关系、共同记忆、矛盾处理和未来期待设计问题。' },
+    ],
     connectionId: 'default',
     context: {
       recentChatCount: 12,
@@ -62,6 +75,11 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
     description: 'Char 与 User 轮流写下日记并回应上一页。',
     icon: '📖',
     accent: '#4f7c6a',
+    contentItems: [
+      { id: 'diary-free', name: '自由日记', description: '根据近期相处自然写一页。', guidance: '' },
+      { id: 'diary-memory', name: '共同回忆', description: '围绕一段共同经历交换日记。', guidance: '本轮围绕一段双方共同经历或印象深刻的相处片段来写。' },
+      { id: 'diary-unsaid', name: '没说出口的话', description: '写下平时难以直接表达的内容。', guidance: '本轮围绕平时没有说出口的话、隐藏的情绪或想让对方知道的心意来写。' },
+    ],
     connectionId: 'default',
     context: {
       recentChatCount: 12,
@@ -83,6 +101,14 @@ export const DEFAULT_SETTINGS: CowriteSettings = {
   enabled: true,
   defaultConnectionId: 'st-main',
   starredTemplateIds: [],
+  hiddenTemplateIds: [],
+  generationContext: {
+    recentChatCount: 12,
+    worldInfoMode: 'active',
+    manualEntries: [],
+    manualLoreTokenBudget: 4000,
+    recordTokenBudget: 12000,
+  },
   connections: [{ id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true }],
   ui: { x: null, y: null, edgeTuck: true },
 };

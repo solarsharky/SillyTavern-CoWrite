@@ -1,12 +1,44 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ActivityEngine, applyPatch } from '../src/core/engine';
-import { GeneratedBlockSchema, RecordSchema } from '../src/domain/schema';
+import { GeneratedBlockSchema, RecordSchema, SettingsSchema, TemplateSchema } from '../src/domain/schema';
 import type { RecordRepository } from '../src/adapters/repository';
 import type { GenerationGateway } from '../src/adapters/generation';
 import type { TavernBridge } from '../src/adapters/tavern';
-import { makeRecord } from './fixtures';
+import { makeRecord, makeSettings, makeTemplate } from './fixtures';
+import { BUILTIN_TEMPLATES } from '../src/domain/defaults';
+import { prepareTemplateForGeneration } from '../src/core/template';
 
 describe('追加事务与所有权', () => {
+  it('旧模板与旧设置会补上分类内容和全局上下文默认值', () => {
+    const oldTemplate = makeRecord().templateSnapshot as Record<string, unknown>;
+    delete oldTemplate.contentItems;
+    delete oldTemplate.contentTitle;
+    delete oldTemplate.contentGuidance;
+    const template = TemplateSchema.parse(oldTemplate);
+    expect(template.contentItems).toEqual([]);
+    expect(template.contentGuidance).toBe('');
+    const settings = SettingsSchema.parse({ schemaVersion: 1, enabled: true, defaultConnectionId: 'st-main', starredTemplateIds: [], connections: [{ id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true }], ui: { x: null, y: null, edgeTuck: true } });
+    expect(settings.generationContext.recentChatCount).toBe(12);
+    expect(settings.hiddenTemplateIds).toEqual([]);
+  });
+
+  it('内置格式分类各自包含可独立增删的内容项', () => {
+    expect(BUILTIN_TEMPLATES.map((template) => template.name)).toEqual(['双人问卷', 'Char 给 User 的问卷', '交换日记']);
+    expect(BUILTIN_TEMPLATES.every((template) => template.contentItems.length > 0)).toBe(true);
+    expect(BUILTIN_TEMPLATES[0]?.contentItems.map((item) => item.name)).toContain('依恋类型');
+  });
+
+  it('开始内容项时统一应用全局上下文并分离内容与格式', () => {
+    const source = makeTemplate({ context: { ...makeTemplate().context, recentChatCount: 2, worldInfoMode: 'off' } });
+    const globalContext = { ...makeSettings().generationContext, recentChatCount: 30, worldInfoMode: 'both' as const };
+    const prepared = prepareTemplateForGeneration(source, globalContext, { id: 'attachment', name: '依恋类型', description: '', guidance: '围绕安全感出题。' });
+    expect(prepared.context.recentChatCount).toBe(30);
+    expect(prepared.context.worldInfoMode).toBe('both');
+    expect(prepared.contentTitle).toBe('依恋类型');
+    expect(prepared.contentGuidance).toBe('围绕安全感出题。');
+    expect(prepared.prompts).toEqual(source.prompts);
+  });
+
   it('拒绝 AI 伪造已经填写的 User 文本', () => {
     expect(GeneratedBlockSchema.safeParse({ key: 'bad', kind: 'text', author: 'user', title: '', content: '我替你回答', targetIds: [] }).success).toBe(false);
   });

@@ -16,6 +16,14 @@ describe('上下文与提示词', () => {
     expect(prompt).toContain('阿澜');
   });
 
+  it('把内容项要求与格式流程分区发送', () => {
+    const template = makeTemplate({ contentTitle: '依恋类型', contentGuidance: '必须包含安全感相关题目。' });
+    const prompt = buildStagePrompt(template, makeRecord({ templateSnapshot: template }), 'opening');
+    expect(prompt).toContain('本轮流程');
+    expect(prompt).toContain('本轮内容要求（只决定主题和内容，不得改变输出格式）');
+    expect(prompt).toContain('必须包含安全感相关题目。');
+  });
+
   it('有滚动摘要后仅发送最近轮次和待处理输入', () => {
     let record = makeRecord();
     for (let index = 0; index < 5; index += 1) {

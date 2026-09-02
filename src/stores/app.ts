@@ -8,6 +8,7 @@ import { createBackup, downloadText, importBackup, importTemplate, recordToMarkd
 import { buildPromptPreview } from '../core/prompt';
 import { DEFAULT_PROTOCOL } from '../core/protocol';
 import { cloneJson } from '../core/clone';
+import { prepareTemplateForGeneration } from '../core/template';
 import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS, cloneBuiltinTemplate } from '../domain/defaults';
 import {
   BackupSchema,
@@ -16,6 +17,7 @@ import {
   SettingsSchema,
   TemplateSchema,
   type ConnectionProfile,
+  type ContentItem,
   type CowriteRecord,
   type CowriteSettings,
   type CowriteTemplate,
@@ -69,7 +71,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
     return [...matching, ...unbound];
   });
   const canGenerate = computed(() => Boolean(characterId.value) && !busy.value);
-  const customTemplates = computed(() => templates.value.filter((item) => !item.builtin));
+  const persistedTemplates = computed(() => templates.value);
 
   async function initialize(): Promise<void> {
     if (initialized.value) return;
@@ -110,9 +112,9 @@ export const useCowriteStore = defineStore('cowrite', () => {
     }
   }
 
-  async function start(template: CowriteTemplate): Promise<void> {
+  async function start(template: CowriteTemplate, content?: ContentItem): Promise<void> {
     await run(async () => {
-      const prepared = cloneJson(template);
+      const prepared = prepareTemplateForGeneration(template, settings.generationContext, content);
       applyEngineResult(await engine.start(prepared));
       tab.value = 'current';
     });
@@ -121,9 +123,10 @@ export const useCowriteStore = defineStore('cowrite', () => {
   async function continueRecord(templateOverride?: CowriteTemplate): Promise<void> {
     if (!selectedRecord.value) return;
     await run(async () => {
-      const record = templateOverride
-        ? RecordSchema.parse({ ...cloneJson(selectedRecord.value!), templateSnapshot: cloneJson(templateOverride) })
-        : selectedRecord.value!;
+      const record = RecordSchema.parse({
+        ...cloneJson(selectedRecord.value!),
+        templateSnapshot: prepareTemplateForGeneration(templateOverride || selectedRecord.value!.templateSnapshot, settings.generationContext),
+      });
       applyEngineResult(await engine.continue(record));
     });
   }
@@ -159,7 +162,13 @@ export const useCowriteStore = defineStore('cowrite', () => {
 
   async function nextVolume(): Promise<void> {
     if (!selectedRecord.value) return;
-    await run(async () => applyEngineResult(await engine.createNextVolume(selectedRecord.value!)));
+    await run(async () => {
+      const record = RecordSchema.parse({
+        ...cloneJson(selectedRecord.value!),
+        templateSnapshot: prepareTemplateForGeneration(selectedRecord.value!.templateSnapshot, settings.generationContext),
+      });
+      applyEngineResult(await engine.createNextVolume(record));
+    });
   }
 
   async function removeRecord(record: CowriteRecord): Promise<void> {
@@ -198,9 +207,13 @@ export const useCowriteStore = defineStore('cowrite', () => {
   }
 
   async function saveTemplate(source: CowriteTemplate): Promise<void> {
-    const parsed = TemplateSchema.parse({ ...cloneJson(source), builtin: false, updatedAt: new Date().toISOString() });
-    templates.value = [...templates.value.filter((item) => item.id !== parsed.id), parsed];
+    const parsed = TemplateSchema.parse({ ...cloneJson(source), updatedAt: new Date().toISOString() });
+    const index = templates.value.findIndex((item) => item.id === parsed.id);
+    if (index >= 0) templates.value.splice(index, 1, parsed);
+    else templates.value.push(parsed);
+    settings.hiddenTemplateIds = settings.hiddenTemplateIds.filter((id) => id !== parsed.id);
     await persistTemplates();
+    saveSettings();
     notices.value = ['模板已保存。'];
   }
 
@@ -211,9 +224,35 @@ export const useCowriteStore = defineStore('cowrite', () => {
   }
 
   async function removeTemplate(template: CowriteTemplate): Promise<void> {
-    if (template.builtin) throw new Error('内置模板不能删除，可以复制后修改。');
+    if (template.builtin && !settings.hiddenTemplateIds.includes(template.id)) settings.hiddenTemplateIds.push(template.id);
     templates.value = templates.value.filter((item) => item.id !== template.id);
+    settings.starredTemplateIds = settings.starredTemplateIds.filter((id) => id !== template.id);
     await persistTemplates();
+    saveSettings();
+  }
+
+  async function restoreBuiltinTemplates(): Promise<void> {
+    settings.hiddenTemplateIds = [];
+    templates.value = mergeTemplates(templates.value);
+    await persistTemplates();
+    saveSettings();
+    notices.value = ['已恢复内置格式分类。'];
+  }
+
+  async function saveContentItem(template: CowriteTemplate, content: ContentItem): Promise<void> {
+    const next = cloneJson(template);
+    const index = next.contentItems.findIndex((item) => item.id === content.id);
+    if (index >= 0) next.contentItems[index] = cloneJson(content);
+    else next.contentItems.push(cloneJson(content));
+    await saveTemplate(next);
+    notices.value = [`内容“${content.name}”已保存。`];
+  }
+
+  async function removeContentItem(template: CowriteTemplate, content: ContentItem): Promise<void> {
+    const next = cloneJson(template);
+    next.contentItems = next.contentItems.filter((item) => item.id !== content.id);
+    await saveTemplate(next);
+    notices.value = [`内容“${content.name}”已删除。`];
   }
 
   async function toggleTemplateStar(template: CowriteTemplate): Promise<void> {
@@ -290,7 +329,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
   }
 
   function exportBackup(): void {
-    const backup = createBackup(settings, customTemplates.value, records.value);
+    const backup = createBackup(settings, persistedTemplates.value, records.value);
     downloadText(`cowrite-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(backup, null, 2));
   }
 
@@ -302,10 +341,10 @@ export const useCowriteStore = defineStore('cowrite', () => {
       const result = await repository.saveRecord(record);
       if (!result.synced && !unsyncedRecordIds.value.includes(record.id)) unsyncedRecordIds.value.push(record.id);
     }
-    records.value = [...imported.records, ...records.value];
-    templates.value = mergeTemplates([...customTemplates.value, ...imported.templates]);
-    await persistTemplates();
     Object.assign(settings, SettingsSchema.parse(validated.settings));
+    records.value = [...imported.records, ...records.value];
+    templates.value = mergeTemplates([...persistedTemplates.value, ...imported.templates]);
+    await persistTemplates();
     saveSettings();
     notices.value = [`已导入 ${imported.records.length} 份记录、${imported.templates.length} 个模板；重映射 ${imported.remapped} 个冲突 ID。`];
   }
@@ -369,19 +408,29 @@ export const useCowriteStore = defineStore('cowrite', () => {
       ...cloneJson(DEFAULT_SETTINGS),
       ...(saved || {}),
       ui: { ...DEFAULT_SETTINGS.ui, ...(saved?.ui || {}) },
+      generationContext: { ...DEFAULT_SETTINGS.generationContext, ...(saved?.generationContext || {}) },
       connections: saved?.connections || DEFAULT_SETTINGS.connections,
     };
     Object.assign(settings, SettingsSchema.parse(merged));
   }
 
   async function persistTemplates(): Promise<void> {
-    const result = await repository.saveTemplates(customTemplates.value);
+    const result = await repository.saveTemplates(templates.value);
     if (!result.synced) notices.value = [`模板未同步到账户文件：${result.error}。已保留在浏览器缓存中。`];
   }
 
   function mergeTemplates(stored: CowriteTemplate[]): CowriteTemplate[] {
-    const valid = stored.filter((item) => TemplateSchema.safeParse(item).success && !item.builtin);
-    return [...cloneJson(BUILTIN_TEMPLATES), ...valid].map((item) => ({
+    const valid = stored.flatMap((item) => {
+      const parsed = TemplateSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    });
+    const storedById = new Map(valid.map((item) => [item.id, item]));
+    const builtinIds = new Set(BUILTIN_TEMPLATES.map((item) => item.id));
+    const merged = [
+      ...BUILTIN_TEMPLATES.map((item) => storedById.get(item.id) || cloneJson(item)),
+      ...valid.filter((item) => !builtinIds.has(item.id)),
+    ];
+    return merged.filter((item) => !settings.hiddenTemplateIds.includes(item.id)).map((item) => ({
       ...item,
       starred: settings.starredTemplateIds.includes(item.id) || item.starred,
     }));
@@ -390,9 +439,9 @@ export const useCowriteStore = defineStore('cowrite', () => {
   return {
     initialized, busy, open, tab, error, notices, rawOutput, records, unsyncedRecordIds, templates, selectedRecordId,
     characterId, characterName, helperVersion, settings, sessionKeys, selectedRecord, visibleRecords,
-    canGenerate, customTemplates, initialize, refreshCharacter, start, continueRecord, stopGeneration,
+    canGenerate, persistedTemplates, initialize, refreshCharacter, start, continueRecord, stopGeneration,
     commitInput, undo, redo, setRecordStatus, toggleRecordStar, nextVolume, removeRecord, retrySync, rebindRecord, saveTemplate,
-    duplicateTemplate, removeTemplate, toggleTemplateStar, importTemplateJson, exportTemplate, saveConnections, testConnection,
+    duplicateTemplate, removeTemplate, restoreBuiltinTemplates, saveContentItem, removeContentItem, toggleTemplateStar, importTemplateJson, exportTemplate, saveConnections, testConnection,
     addConnection, exportRecord, importRecordJson, exportBackup, restoreBackup, exportRawOutput, preview, resetProtocol,
     saveUiPosition, saveSettings, clearMessages,
   };

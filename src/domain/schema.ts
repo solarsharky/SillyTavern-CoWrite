@@ -114,6 +114,23 @@ export const ManualLoreEntrySchema = z.object({
 });
 export type ManualLoreEntry = z.infer<typeof ManualLoreEntrySchema>;
 
+export const GenerationContextSchema = z.object({
+  recentChatCount: z.number().int().min(0).max(100).default(12),
+  worldInfoMode: z.enum(['active', 'manual', 'both', 'off']).default('active'),
+  manualEntries: z.array(ManualLoreEntrySchema).default([]),
+  manualLoreTokenBudget: z.number().int().min(0).max(50000).default(4000),
+  recordTokenBudget: z.number().int().min(1000).max(200000).default(12000),
+});
+export type GenerationContext = z.infer<typeof GenerationContextSchema>;
+
+export const ContentItemSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(80),
+  description: z.string().max(300).default(''),
+  guidance: z.string().max(8000).default(''),
+});
+export type ContentItem = z.infer<typeof ContentItemSchema>;
+
 export const TemplateSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
   id: z.string().min(1),
@@ -123,18 +140,15 @@ export const TemplateSchema = z.object({
   accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#b7794b'),
   builtin: z.boolean().default(false),
   starred: z.boolean().default(false),
+  contentGuidance: z.string().max(8000).default(''),
+  contentTitle: z.string().max(80).default(''),
+  contentItems: z.array(ContentItemSchema).default([]),
   prompts: z.object({
     rules: z.string().min(1),
     opening: z.string().min(1),
     continuation: z.string().min(1),
   }),
-  context: z.object({
-    recentChatCount: z.number().int().min(0).max(100).default(12),
-    worldInfoMode: z.enum(['active', 'manual', 'both', 'off']).default('active'),
-    manualEntries: z.array(ManualLoreEntrySchema).default([]),
-    manualLoreTokenBudget: z.number().int().min(0).max(50000).default(4000),
-    recordTokenBudget: z.number().int().min(1000).max(200000).default(12000),
-  }),
+  context: GenerationContextSchema,
   connectionId: z.string().default('default'),
   advancedProtocol: z.string().optional(),
   createdAt: z.string(),
@@ -203,6 +217,14 @@ export const SettingsSchema = z.object({
   enabled: z.boolean().default(true),
   defaultConnectionId: z.string().default('st-main'),
   starredTemplateIds: z.array(z.string()).default([]),
+  hiddenTemplateIds: z.array(z.string()).default([]),
+  generationContext: GenerationContextSchema.default({
+    recentChatCount: 12,
+    worldInfoMode: 'active',
+    manualEntries: [],
+    manualLoreTokenBudget: 4000,
+    recordTokenBudget: 12000,
+  }),
   connections: z.array(ConnectionProfileSchema),
   ui: z.object({
     x: z.number().nullable().default(null),

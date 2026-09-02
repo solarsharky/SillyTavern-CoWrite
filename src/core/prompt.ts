@@ -46,12 +46,13 @@ export function serializeRecordForModel(record: CowriteRecord): string {
 
 export function buildStagePrompt(template: CowriteTemplate, record: CowriteRecord, stage: GenerationStage): string {
   const stagePrompt = stage === 'opening' ? template.prompts.opening : template.prompts.continuation;
-  return `${expandPrompt(template.prompts.rules, record)}\n\n本轮任务：\n${expandPrompt(stagePrompt, record)}\n\n<record_data>\n${serializeRecordForModel(record)}\n</record_data>`;
+  const contentGuidance = template.contentGuidance.trim() || '没有额外内容要求；按玩法和角色设定自然发挥。';
+  return `${expandPrompt(template.prompts.rules, record)}\n\n本轮流程：\n${expandPrompt(stagePrompt, record)}\n\n本轮内容要求（只决定主题和内容，不得改变输出格式）：\n${expandPrompt(contentGuidance, record)}\n\n<record_data>\n${serializeRecordForModel(record)}\n</record_data>`;
 }
 
 export function buildPromptPreview(template: CowriteTemplate, record?: CowriteRecord): string {
   if (!record) {
-    return `${template.prompts.rules}\n\n--- 首轮 ---\n${template.prompts.opening}\n\n--- 继续 ---\n${template.prompts.continuation}`;
+    return `${template.prompts.rules}\n\n--- 首轮流程 ---\n${template.prompts.opening}\n\n--- 继续流程 ---\n${template.prompts.continuation}\n\n--- 内容要求 ---\n${template.contentGuidance || '（无额外要求）'}`;
   }
   return buildStagePrompt(template, record, record.cycles.length ? 'continuation' : 'opening');
 }

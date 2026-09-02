@@ -43,7 +43,7 @@ export class ActivityEngine {
     const record: CowriteRecord = {
       schemaVersion: SCHEMA_VERSION,
       id: crypto.randomUUID(),
-      title: `${template.name} · ${new Date().toLocaleDateString('zh-CN')}`,
+      title: `${template.name}${template.contentTitle ? ` · ${template.contentTitle}` : ''} · ${new Date().toLocaleDateString('zh-CN')}`,
       templateId: template.id,
       templateSnapshot: cloneJson(template),
       characterId: character.id,
