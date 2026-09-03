@@ -18,6 +18,7 @@ import {
 } from '../domain/schema';
 import { serializeRecordForModel, type GenerationStage } from './prompt';
 import { cloneJson } from './clone';
+import { createId } from './id';
 import type { z } from 'zod';
 
 export interface EngineResult {
@@ -46,7 +47,7 @@ export class ActivityEngine {
     const date = new Date().toISOString();
     const record: CowriteRecord = {
       schemaVersion: SCHEMA_VERSION,
-      id: crypto.randomUUID(),
+      id: createId(),
       title: `${template.name}${template.contentTitle ? ` · ${template.contentTitle}` : ''} · ${new Date().toLocaleDateString('zh-CN')}`,
       templateId: template.id,
       templateSnapshot: cloneJson(template),
@@ -220,10 +221,10 @@ export class ActivityEngine {
 
 export function applyPatch(record: CowriteRecord, patch: GenerationPatch, stage: GenerationStage, date = new Date().toISOString()): CowriteRecord {
   const next = cloneJson(record);
-  const cycleId = crypto.randomUUID();
+  const cycleId = createId();
   const keys = patch.blocks.map((block) => block.key);
   if (new Set(keys).size !== keys.length) throw new Error('模型在同一轮返回了重复的卡片 key，记录未被修改。');
-  const keyMap = new Map<string, string>(patch.blocks.map((block) => [block.key, crypto.randomUUID()]));
+  const keyMap = new Map<string, string>(patch.blocks.map((block) => [block.key, createId()]));
   const knownIds = new Set(next.blocks.map((block) => block.id));
   const blocks: Block[] = patch.blocks.map((generated) => {
     const targetIds = generated.targetIds.map((target) => keyMap.get(target) || target);

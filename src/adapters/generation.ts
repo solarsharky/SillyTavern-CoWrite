@@ -5,6 +5,7 @@ import { buildStagePrompt, withGlobalPrompts, type GenerationStage } from '../co
 import { DEFAULT_PROTOCOL, PATCH_JSON_SCHEMA, SUMMARY_JSON_SCHEMA } from '../core/protocol';
 import type { TavernBridge } from './tavern';
 import { BUILTIN_TEMPLATES } from '../domain/defaults';
+import { createId } from '../core/id';
 
 const GENERATION_TIMEOUT_MS = 180_000;
 
@@ -103,7 +104,7 @@ export class TavernGenerationGateway implements GenerationGateway {
   }
 
   private async request(options: Omit<GenerateOptions, 'stage'>, phase: GenerationProgress['phase'], config: TavernHelperGenerateConfig): Promise<string | { content: string }> {
-    const generationId = crypto.randomUUID();
+    const generationId = createId();
     const streaming = options.connection.streaming;
     this.activeGenerationId = generationId;
     let unsubscribe = () => {};

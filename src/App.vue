@@ -9,6 +9,7 @@ import { BUILTIN_TEMPLATES, cloneBuiltinTemplate } from './domain/defaults';
 import type { ContentItem, CowriteRecord, CowriteTemplate, InputConfig } from './domain/schema';
 import { useCowriteStore, type AppTab } from './stores/app';
 import { cloneJson } from './core/clone';
+import { createId } from './core/id';
 import { isInputAnswered } from './domain/schema';
 
 const store = useCowriteStore();
@@ -130,7 +131,7 @@ function openTemplateEditor(template: CowriteTemplate): void {
 
 function createTemplate(): void {
   const source = BUILTIN_TEMPLATES[0]!;
-  const draft = cloneBuiltinTemplate(source, crypto.randomUUID());
+  const draft = cloneBuiltinTemplate(source, createId());
   draft.name = '我的新分类';
   draft.description = '';
   draft.icon = '🗂️';
@@ -143,7 +144,7 @@ function createTemplate(): void {
 function openContentEditor(template: CowriteTemplate, item?: ContentItem): void {
   contentEditor.value = {
     template: cloneJson(template),
-    item: item ? cloneJson(item) : { id: crypto.randomUUID(), name: '新内容', description: '', guidance: '' },
+    item: item ? cloneJson(item) : { id: createId(), name: '新内容', description: '', guidance: '' },
   };
 }
 

@@ -2,6 +2,13 @@
 
 所有重要变更都会记录在这里。本项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## [0.1.0-beta.10] - 2026-09-03
+
+### Fixed
+
+- 修复通过 HTTP 局域网地址访问时，浏览器缺少 `crypto.randomUUID()` 导致新建问卷等操作报错的问题。
+- 记录、轮次、卡片、生成请求、模板、内容项、API 连接及导入统一使用兼容的 UUID 生成方法；原生接口不可用时通过 `crypto.getRandomValues()` 生成标准 v4 UUID。
+
 ## [0.1.0-beta.9] - 2026-09-03
 
 ### Added

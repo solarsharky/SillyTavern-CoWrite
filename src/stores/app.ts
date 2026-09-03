@@ -8,6 +8,7 @@ import { createBackup, downloadText, importBackup, importTemplate, recordToMarkd
 import { buildPromptPreview } from '../core/prompt';
 import { DEFAULT_PROTOCOL } from '../core/protocol';
 import { cloneJson } from '../core/clone';
+import { createId } from '../core/id';
 import { prepareTemplateForGeneration } from '../core/template';
 import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS, cloneBuiltinTemplate, upgradeBuiltinPrompts } from '../domain/defaults';
 import {
@@ -219,7 +220,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
   }
 
   async function duplicateTemplate(source: CowriteTemplate): Promise<CowriteTemplate> {
-    const copy = cloneBuiltinTemplate(source, crypto.randomUUID());
+    const copy = cloneBuiltinTemplate(source, createId());
     await saveTemplate(copy);
     return copy;
   }
@@ -302,7 +303,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
 
   function addConnection(): ConnectionProfile {
     return {
-      id: crypto.randomUUID(), type: 'custom', name: '新连接', apiUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini',
+      id: createId(), type: 'custom', name: '新连接', apiUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini',
       temperature: 0.8, maxTokens: 4096, rememberKey: false,
       streaming: false,
     };
@@ -319,7 +320,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
     const record = cloneJson(source);
     if (records.value.some((item) => item.id === record.id)) {
       const previousId = record.id;
-      record.id = crypto.randomUUID();
+      record.id = createId();
       if (record.parentRecordId === previousId) record.parentRecordId = record.id;
     }
     record.updatedAt = new Date().toISOString();

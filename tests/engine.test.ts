@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ActivityEngine, applyPatch } from '../src/core/engine';
-import type { GenerationGateway } from '../src/adapters/generation';
+import { TavernGenerationGateway, type GenerationGateway } from '../src/adapters/generation';
 import type { RecordRepository } from '../src/adapters/repository';
 import type { TavernBridge } from '../src/adapters/tavern';
 import type { ConnectionProfile, GlobalPrompt } from '../src/domain/schema';
@@ -29,6 +29,28 @@ function setup(overrides: { tokens?: number; summarize?: () => Promise<string>; 
 }
 
 describe('ActivityEngine 深模块', () => {
+  it('浏览器缺少 randomUUID 时仍能请求并保存完整双人问卷，保留题目关联', async () => {
+    const browserCrypto = globalThis.crypto;
+    vi.stubGlobal('crypto', { getRandomValues: browserCrypto.getRandomValues.bind(browserCrypto) });
+    try {
+      const { repository, tavern } = setup();
+      const generateRaw = vi.fn<(config: TavernHelperGenerateConfig) => Promise<string>>(async () => JSON.stringify(makeQuestionPatch()));
+      Object.assign(tavern, { helper: { generateRaw } });
+      const gateway = new TavernGenerationGateway(tavern);
+      const engine = new ActivityEngine({ repository, gateway, tavern, resolveConnection: () => ({ profile: connection }) });
+      const { record } = await engine.start(makeTemplate());
+      const ids = [record.id, record.cycles[0]!.id, ...record.blocks.map((block) => block.id), generateRaw.mock.calls[0]![0].generation_id];
+      expect(new Set(ids).size).toBe(5);
+      for (const id of ids) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      expect(record.blocks[1]?.targetIds).toEqual([record.blocks[0]?.id]);
+      expect(record.blocks.every((block) => block.cycleId === record.cycles[0]?.id)).toBe(true);
+      expect(repository.saveRecord).toHaveBeenCalledOnce();
+      expect(repository.saveRecord).toHaveBeenCalledWith(record);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('首轮成功后才一次性保存完整事务', async () => {
     const { engine, repository } = setup();
     const result = await engine.start(makeTemplate({ contentTitle: '依恋类型', contentGuidance: '围绕安全感出题。' }));
