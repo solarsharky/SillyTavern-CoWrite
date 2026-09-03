@@ -32,8 +32,10 @@ describe('备份与导出', () => {
   it('整库备份保留首尾 Prompt 和每个连接的流式选择', () => {
     const settings = makeSettings({ globalPrompt: { enabled: true, prefix: '开头要求', suffix: '结尾要求' } });
     settings.connections[0]!.streaming = true;
+    settings.generationContext.recordTokenBudget = 1_000_000;
     const restored = BackupSchema.parse(JSON.parse(JSON.stringify(createBackup(settings, [], []))));
     expect(restored.settings.globalPrompt).toEqual(settings.globalPrompt);
     expect(restored.settings.connections[0]?.streaming).toBe(true);
+    expect(restored.settings.generationContext.recordTokenBudget).toBe(1_000_000);
   });
 });

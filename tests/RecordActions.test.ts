@@ -60,6 +60,75 @@ describe('记录操作', () => {
     expect(store.selectedRecord?.blocks[0]?.input?.value).toBe('刚刚填好的答案');
   });
 
+  it.each([120_000, 1_000_000])('当前问卷超出旧预算后，在设置提高到 %i 即可继续生成逐题点评', async (budgetTokens) => {
+    const { store, pinia, record } = setup();
+    vi.mocked(TavernBridge.prototype.countTokens).mockResolvedValue(budgetTokens / 2);
+    if (budgetTokens === 1_000_000) {
+      const connection = store.addConnection();
+      store.settings.connections.push(connection);
+      store.settings.defaultConnectionId = connection.id;
+      store.sessionKeys[connection.id] = 'test-key';
+    }
+    store.settings.generationContext.recordTokenBudget = 12_000;
+    store.records[0]!.templateSnapshot.context.recordTokenBudget = 12_000;
+    store.records[0]!.blocks[0]!.input!.value = '已填写的答案';
+    vi.mocked(TavernGenerationGateway.prototype.generatePatch).mockResolvedValue({
+      complete: true,
+      blocks: [{ key: 'review', kind: 'review', author: 'char', title: '', content: '这是对你答案的点评', targetIds: [record.blocks[0]!.id] }],
+    });
+    await store.continueRecord();
+    expect(store.error).toContain('阈值');
+    expect(TavernGenerationGateway.prototype.generatePatch).not.toHaveBeenCalled();
+
+    store.tab = 'settings';
+    const wrapper = mount(App, { global: { plugins: [pinia] } });
+    const budget = wrapper.findAll('label').find((label) => label.text().includes('自动压缩阈值'))!.find('input');
+    await budget.setValue(budgetTokens);
+    await wrapper.findAll('button').find((button) => button.text() === '保存上下文设置')!.trigger('click');
+    store.tab = 'current';
+    await wrapper.vm.$nextTick();
+    await wrapper.findAll('.cw-actionbar button').find((button) => button.text() === '交给他写')!.trigger('click');
+    await vi.waitFor(() => expect(store.busy).toBe(false));
+    expect(store.error).toBe('');
+    expect(TavernGenerationGateway.prototype.generatePatch).toHaveBeenCalledOnce();
+    const request = vi.mocked(TavernGenerationGateway.prototype.generatePatch).mock.calls[0]![0];
+    expect(request.template.context.recordTokenBudget).toBe(budgetTokens);
+    expect(request.connection.type).toBe(budgetTokens === 1_000_000 ? 'custom' : 'st');
+    expect(store.selectedRecord?.id).toBe(record.id);
+    expect(store.selectedRecord?.blocks[0]?.input?.value).toBe('已填写的答案');
+    expect(wrapper.find('.cw-inline-reviews--user').text()).toContain('这是对你答案的点评');
+    wrapper.unmount();
+  });
+
+  it('用户调低压缩阈值后先摘要再点评，完整原文和已填答案仍保留', async () => {
+    const { store, pinia, record } = setup();
+    let source = record;
+    source.blocks[0]!.input!.value = '完整保留这份答案';
+    for (let index = 0; index < 4; index += 1) {
+      source = applyPatch(source, { complete: false, blocks: [{ key: `text-${index}`, kind: 'text', author: 'char', title: '', content: `第 ${index} 次对话`, targetIds: [] }] }, 'continuation');
+    }
+    store.records = [source];
+    store.tab = 'settings';
+    vi.mocked(TavernBridge.prototype.countTokens).mockResolvedValue(40_000);
+    const summarize = vi.spyOn(TavernGenerationGateway.prototype, 'summarize').mockResolvedValue('早期摘要');
+    const wrapper = mount(App, { global: { plugins: [pinia] } });
+    const threshold = wrapper.findAll('label').find((label) => label.text().includes('自动压缩阈值'))!.find('input');
+    await threshold.setValue(30_000);
+    await wrapper.findAll('button').find((button) => button.text() === '保存上下文设置')!.trigger('click');
+    store.tab = 'current';
+    await wrapper.vm.$nextTick();
+    await wrapper.findAll('.cw-actionbar button').find((button) => button.text() === '交给他写')!.trigger('click');
+    await vi.waitFor(() => expect(store.busy).toBe(false));
+    expect(store.error).toBe('');
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(TavernGenerationGateway.prototype.generatePatch).toHaveBeenCalledOnce();
+    expect(summarize.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(TavernGenerationGateway.prototype.generatePatch).mock.invocationCallOrder[0]!);
+    expect(store.selectedRecord?.rollingSummary).toBe('早期摘要');
+    expect(store.selectedRecord?.blocks.slice(0, source.blocks.length)).toEqual(source.blocks);
+    expect(store.selectedRecord?.blocks[0]?.input?.value).toBe('完整保留这份答案');
+    wrapper.unmount();
+  });
+
   it('等待手填保存时点击停止，不会随后偷偷开始生成', async () => {
     const { store, record } = setup();
     let finish!: () => void;

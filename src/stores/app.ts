@@ -10,7 +10,7 @@ import { DEFAULT_PROTOCOL } from '../core/protocol';
 import { cloneJson } from '../core/clone';
 import { createId } from '../core/id';
 import { prepareTemplateForGeneration } from '../core/template';
-import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS, cloneBuiltinTemplate, upgradeBuiltinPrompts } from '../domain/defaults';
+import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS, cloneBuiltinTemplate, upgradeBuiltinPrompts, upgradeSettings } from '../domain/defaults';
 import {
   BackupSchema,
   ConnectionProfileSchema,
@@ -344,7 +344,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
       const result = await repository.saveRecord(record);
       if (!result.synced && !unsyncedRecordIds.value.includes(record.id)) unsyncedRecordIds.value.push(record.id);
     }
-    Object.assign(settings, SettingsSchema.parse(validated.settings));
+    Object.assign(settings, upgradeSettings(SettingsSchema.parse(validated.settings)));
     records.value = [...imported.records, ...records.value];
     templates.value = mergeTemplates([...persistedTemplates.value, ...imported.templates]);
     await persistTemplates();
@@ -422,12 +422,13 @@ export const useCowriteStore = defineStore('cowrite', () => {
     const merged = {
       ...cloneJson(DEFAULT_SETTINGS),
       ...(saved || {}),
+      recordBudgetDefaultsVersion: saved?.recordBudgetDefaultsVersion ?? 0,
       ui: { ...DEFAULT_SETTINGS.ui, ...(saved?.ui || {}) },
       generationContext: { ...DEFAULT_SETTINGS.generationContext, ...(saved?.generationContext || {}) },
       globalPrompt: { ...DEFAULT_SETTINGS.globalPrompt, ...(saved?.globalPrompt || {}) },
       connections: saved?.connections || DEFAULT_SETTINGS.connections,
     };
-    Object.assign(settings, SettingsSchema.parse(merged));
+    Object.assign(settings, upgradeSettings(SettingsSchema.parse(merged)));
   }
 
   async function persistTemplates(): Promise<void> {

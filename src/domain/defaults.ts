@@ -1,5 +1,5 @@
 import type { CowriteSettings, CowriteTemplate } from './schema';
-import { SCHEMA_VERSION } from './schema';
+import { SCHEMA_VERSION, DEFAULT_RECORD_TOKEN_BUDGET } from './schema';
 import { cloneJson } from '../core/clone';
 
 const now = '2026-01-01T00:00:00.000Z';
@@ -43,7 +43,7 @@ User 答完并点击“交给他写”后，先按分类流程生成逐题 revie
       worldInfoMode: 'active',
       manualEntries: [],
       manualLoreTokenBudget: 4000,
-      recordTokenBudget: 12000,
+      recordTokenBudget: DEFAULT_RECORD_TOKEN_BUDGET,
     },
     prompts: {
       rules: `这是 {{char}} 与 {{user}} 共同完成的双人问卷。保持 {{char}} 的性格、措辞和关系认知。每次只推进一个自然阶段，不要替 {{user}} 填写。每道给 User 的问题都必须是一张 input 卡片，完整题干写入 input.label；title 只写题号，content 留空。`,
@@ -68,7 +68,7 @@ User 答完并点击“交给他写”后，先按分类流程生成逐题 revie
       worldInfoMode: 'active',
       manualEntries: [],
       manualLoreTokenBudget: 4000,
-      recordTokenBudget: 12000,
+      recordTokenBudget: DEFAULT_RECORD_TOKEN_BUDGET,
     },
     prompts: {
       rules: `由 {{char}} 主持一份面向 {{user}} 的问卷。问题应符合角色性格和当前关系，不替 User 作答。每道题都必须是一张 input 卡片，完整题干写入 input.label；title 只写题号，content 留空。`,
@@ -93,7 +93,7 @@ User 答完并点击“交给他写”后，先按分类流程生成逐题 revie
       worldInfoMode: 'active',
       manualEntries: [],
       manualLoreTokenBudget: 4000,
-      recordTokenBudget: 12000,
+      recordTokenBudget: DEFAULT_RECORD_TOKEN_BUDGET,
     },
     prompts: {
       rules: `这是 {{char}} 与 {{user}} 的交换日记。文字私密、自然、符合角色，不要替 User 写日记。记录可持续多轮，除非 User 主动结束，否则不要标记完成。给 User 的书写邀请必须是一张 long input 卡片，完整邀请写入 input.label，content 留空。`,
@@ -105,6 +105,7 @@ User 答完并点击“交给他写”后，先按分类流程生成逐题 revie
 
 export const DEFAULT_SETTINGS: CowriteSettings = {
   schemaVersion: SCHEMA_VERSION,
+  recordBudgetDefaultsVersion: 1,
   enabled: true,
   defaultConnectionId: 'st-main',
   starredTemplateIds: [],
@@ -115,11 +116,23 @@ export const DEFAULT_SETTINGS: CowriteSettings = {
     worldInfoMode: 'active',
     manualEntries: [],
     manualLoreTokenBudget: 4000,
-    recordTokenBudget: 12000,
+    recordTokenBudget: DEFAULT_RECORD_TOKEN_BUDGET,
   },
   connections: [{ id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true, streaming: false }],
   ui: { x: null, y: null, edgeTuck: true },
 };
+
+export function upgradeSettings(source: CowriteSettings): CowriteSettings {
+  const next = cloneJson(source);
+  if (next.recordBudgetDefaultsVersion < 1) {
+    if (next.generationContext.recordTokenBudget === 12_000) {
+      next.generationContext.recordTokenBudget = DEFAULT_RECORD_TOKEN_BUDGET;
+    }
+    // Mark the migration so a later deliberate choice of 12,000 is preserved.
+    next.recordBudgetDefaultsVersion = 1;
+  }
+  return next;
+}
 
 export function cloneBuiltinTemplate(source: CowriteTemplate, id: string, date = new Date().toISOString()): CowriteTemplate {
   return {

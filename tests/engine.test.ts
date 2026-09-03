@@ -69,6 +69,7 @@ describe('ActivityEngine 深模块', () => {
 
   it('超过预算时先摘要早期轮次，再进行主生成', async () => {
     let record = makeRecord();
+    record.templateSnapshot.context.recordTokenBudget = 12_000;
     for (let index = 0; index < 5; index += 1) {
       record = applyPatch(record, { complete: false, blocks: [{ key: `a${index}`, kind: 'text', author: 'char', title: '', content: `旧内容${index}`, targetIds: [] }] }, index ? 'continuation' : 'opening');
     }
@@ -79,8 +80,18 @@ describe('ActivityEngine 深模块', () => {
     expect(result.record.rollingSummary).toBe('早期摘要');
   });
 
+  it.each([120_000, 120_001])('按实际配置的十二万预算判断 %i tokens 是否需要摘要', async (tokens) => {
+    let record = makeRecord();
+    for (let index = 0; index < 5; index += 1) record = applyPatch(record, generatedPatch, index ? 'continuation' : 'opening');
+    const { engine, gateway } = setup({ tokens });
+    await engine.continue(record);
+    expect(gateway.summarize).toHaveBeenCalledTimes(tokens > 120_000 ? 1 : 0);
+    expect(gateway.generatePatch).toHaveBeenCalledOnce();
+  });
+
   it('摘要失败会阻止主生成和新卡片写入', async () => {
     let record = makeRecord();
+    record.templateSnapshot.context.recordTokenBudget = 12_000;
     for (let index = 0; index < 5; index += 1) record = applyPatch(record, { complete: false, blocks: [{ key: `a${index}`, kind: 'text', author: 'char', title: '', content: '旧内容', targetIds: [] }] }, 'continuation');
     const { engine, gateway, repository } = setup({ tokens: 20_000, summarize: async () => { throw new Error('摘要失败'); } });
     await expect(engine.continue(record)).rejects.toThrow('摘要失败');
@@ -90,6 +101,7 @@ describe('ActivityEngine 深模块', () => {
 
   it('同一次生成的摘要和主请求使用一致的全局 Prompt，下一次请求读取最新设置', async () => {
     let record = makeRecord();
+    record.templateSnapshot.context.recordTokenBudget = 12_000;
     for (let index = 0; index < 5; index += 1) record = applyPatch(record, generatedPatch, index ? 'continuation' : 'opening');
     const globalPrompt = { enabled: true, prefix: '前置', suffix: '后置' };
     const { engine, gateway } = setup({

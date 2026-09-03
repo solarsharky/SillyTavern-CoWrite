@@ -160,9 +160,13 @@ async function restore(event: Event): Promise<void> {
             <option value="off">不使用世界书</option>
           </select>
         </label>
-        <label>长记录预算（tokens）<input v-model.number="settings.generationContext.recordTokenBudget" class="cw-field" type="number" min="1000" max="200000" /></label>
+        <label>自动压缩阈值（tokens）
+          <input v-model.number="settings.generationContext.recordTokenBudget" class="cw-field" type="number" min="1000" max="1000000" step="1000" />
+          <small>默认 120,000，上限 1,000,000，可自行调高或调低；共笔记录超过此值才尝试摘要压缩。保存后，当前记录的下一次生成就会使用新阈值。</small>
+        </label>
         <label v-if="isManualLore">手选世界书预算（tokens）<input v-model.number="settings.generationContext.manualLoreTokenBudget" class="cw-field" type="number" min="0" max="50000" /></label>
       </div>
+      <p class="cw-help">压缩只影响后续发送给模型的上下文，完整原文仍保留在记录中。API 或酒馆预设中的模型上下文上限需要在对应连接处设置。</p>
       <p v-if="['active', 'both'].includes(settings.generationContext.worldInfoMode)" class="cw-help">当前激活世界书会通过 SillyTavern 原生的 world_info_before / world_info_after 位置读取。</p>
       <div v-if="isManualLore" class="cw-lore-picker">
         <select v-model="selectedBook" class="cw-field" @change="selectBook">
@@ -262,7 +266,7 @@ async function restore(event: Event): Promise<void> {
 
     <section class="cw-paper-section">
       <span class="cw-kicker">ABOUT</span>
-      <h2>共笔 v0.1.0-beta.11</h2>
+      <h2>共笔 v0.1.0-beta.12</h2>
       <p>作者 SolarShark · MIT License</p>
       <a href="https://github.com/solarsharky/SillyTavern-CoWrite/issues" target="_blank" rel="noreferrer">反馈问题或建议 ↗</a>
     </section>

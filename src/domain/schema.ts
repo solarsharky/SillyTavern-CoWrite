@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const SCHEMA_VERSION = 1 as const;
+export const DEFAULT_RECORD_TOKEN_BUDGET = 120_000;
 
 export const InputTypeSchema = z.enum(['short', 'long', 'single', 'multi', 'scale']);
 export type InputType = z.infer<typeof InputTypeSchema>;
@@ -129,7 +130,7 @@ export const GenerationContextSchema = z.object({
   worldInfoMode: z.enum(['active', 'manual', 'both', 'off']).default('active'),
   manualEntries: z.array(ManualLoreEntrySchema).default([]),
   manualLoreTokenBudget: z.number().int().min(0).max(50000).default(4000),
-  recordTokenBudget: z.number().int().min(1000).max(200000).default(12000),
+  recordTokenBudget: z.number().int().min(1000).max(1_000_000).default(DEFAULT_RECORD_TOKEN_BUDGET),
 });
 export type GenerationContext = z.infer<typeof GenerationContextSchema>;
 
@@ -238,6 +239,7 @@ export type GlobalPrompt = z.infer<typeof GlobalPromptSchema>;
 
 export const SettingsSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
+  recordBudgetDefaultsVersion: z.number().int().nonnegative().default(0),
   enabled: z.boolean().default(true),
   defaultConnectionId: z.string().default('st-main'),
   starredTemplateIds: z.array(z.string()).default([]),
@@ -248,7 +250,7 @@ export const SettingsSchema = z.object({
     worldInfoMode: 'active',
     manualEntries: [],
     manualLoreTokenBudget: 4000,
-    recordTokenBudget: 12000,
+    recordTokenBudget: DEFAULT_RECORD_TOKEN_BUDGET,
   }),
   connections: z.array(ConnectionProfileSchema),
   ui: z.object({

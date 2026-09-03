@@ -187,7 +187,7 @@ export class ActivityEngine {
     const { record } = options;
     const serialized = serializeRecordForModel(record);
     const tokens = await this.deps.tavern.countTokens(serialized);
-    const budget = Math.min(record.templateSnapshot.context.recordTokenBudget, 12000, Math.floor(this.deps.tavern.maxContext() * 0.4));
+    const budget = record.templateSnapshot.context.recordTokenBudget;
     if (tokens <= budget) return;
 
     const applied = record.cycles.filter((cycle) => cycle.status === 'applied');
@@ -195,7 +195,7 @@ export class ActivityEngine {
     const startIndex = record.summaryThroughCycle ? applied.findIndex((cycle) => cycle.id === record.summaryThroughCycle) + 1 : 0;
     const eligible = applied.slice(startIndex).filter((cycle) => !recentIds.has(cycle.id));
     if (!eligible.length) {
-      throw new Error('这份记录已超过上下文预算，暂时无法压缩。请在设置中提高长记录预算，或从模板库新建一份记录。');
+      throw new Error(`共笔记录约 ${tokens} tokens，超过当前自动压缩阈值 ${budget} tokens。当前题目和答案暂无可压缩的早期轮次，请在设置中提高自动压缩阈值后重试。`);
     }
     const eligibleIds = new Set(eligible.map((cycle) => cycle.id));
     const source = JSON.stringify({

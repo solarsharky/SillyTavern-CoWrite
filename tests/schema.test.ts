@@ -16,6 +16,8 @@ describe('追加事务与所有权', () => {
     expect(template.contentGuidance).toBe('');
     const settings = SettingsSchema.parse({ schemaVersion: 1, enabled: true, defaultConnectionId: 'st-main', starredTemplateIds: [], connections: [{ id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true }], ui: { x: null, y: null, edgeTuck: true } });
     expect(settings.generationContext.recentChatCount).toBe(12);
+    expect(settings.generationContext.recordTokenBudget).toBe(120_000);
+    expect(template.context.recordTokenBudget).toBe(120_000);
     expect(settings.hiddenTemplateIds).toEqual([]);
     expect(settings.globalPrompt).toEqual({ enabled: true, prefix: '', suffix: '' });
     expect(settings.connections[0]?.streaming).toBe(false);
@@ -25,6 +27,14 @@ describe('追加事务与所有权', () => {
     expect(BUILTIN_TEMPLATES.map((template) => template.name)).toEqual(['双人问卷', 'Char 给 User 的问卷', '交换日记']);
     expect(BUILTIN_TEMPLATES.every((template) => template.contentItems.length > 0)).toBe(true);
     expect(BUILTIN_TEMPLATES[0]?.contentItems.map((item) => item.name)).toContain('依恋类型');
+  });
+
+  it('自动压缩阈值允许设置到一百万，但拒绝超过上限', () => {
+    const settings = makeSettings();
+    settings.generationContext.recordTokenBudget = 1_000_000;
+    expect(SettingsSchema.safeParse(settings).success).toBe(true);
+    settings.generationContext.recordTokenBudget = 1_000_001;
+    expect(SettingsSchema.safeParse(settings).success).toBe(false);
   });
 
   it('开始内容项时统一应用全局上下文并分离内容与格式', () => {
