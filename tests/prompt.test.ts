@@ -52,7 +52,7 @@ describe('上下文与提示词', () => {
   it('双人问卷首轮同时生成双方同题型答案，继续时逐题关联评价', () => {
     const template = makeTemplate();
     const opening = buildStagePrompt(template, makeRecord(), 'opening');
-    expect(opening).toContain('5 对');
+    expect(opening).toContain('10 对');
     expect(opening).toContain('kind=answer');
     expect(opening).toContain('User 的输入必须保持空白');
     const continuation = buildStagePrompt(template, makeRecord(), 'continuation');
@@ -60,7 +60,7 @@ describe('上下文与提示词', () => {
     expect(continuation).toContain('targetIds 只填这道 User input 的 id');
     const more = buildStagePrompt(template, makeRecord(), 'more');
     expect(more).toContain('追加一组新题');
-    expect(more).toContain('5 对');
+    expect(more).toContain('10 对');
     expect(more).not.toContain('本轮流程：\nUser 点击');
   });
 });

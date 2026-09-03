@@ -26,7 +26,14 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
     accent: '#b85c74',
     contentItems: [
       { id: 'shared-free', name: '自由主题', description: '根据角色和当前关系自然出题。', guidance: '' },
-      { id: 'shared-attachment', name: '依恋类型', description: '探索亲密关系中的依恋与安全感。', guidance: '围绕依恋类型、亲密关系模式与安全感设计问题。不要直接下心理诊断结论。' },
+      {
+        id: 'shared-attachment', name: '依恋类型', description: '一起完成 10 题测试，获得双方的依恋类型倾向与相处建议。',
+        guidance: `这是一份有计分和结果的双人依恋类型趣味测试。目标是通过 {{char}} 与 {{user}} 对同一组题目的回答，分别判断双方本次的依恋类型倾向。
+首轮或生成更多题时，每组恰好 10 题，全部使用必填 scale，min=1、max=5、minLabel="完全不符合"、maxLabel="完全符合"。每组前 5 题考察依恋焦虑（如担心被抛下、反复确认爱意、对疏远敏感），后 5 题考察亲密回避（如回避依赖、压抑需求、亲密时退缩）。使用具体情境与第一人称陈述，全部正向计分，分数越高对应维度越强，不使用反向题。每道题仍按分类格式创建 User input 与 Char answer 配对；Char 按真实角色设定独立作答，不能为迎合 User 故意选择某一类型。开场简短说明量表含义和答完后会给双方测试结果，首轮不提前下结论。
+User 答完并点击“交给他写”后，先按分类流程生成逐题 review，再额外生成三张 kind=text、author=char、targetIds=[] 的结果卡：标题分别为“{{user}}的测试结果”“{{char}}的测试结果”“我们的相处建议”。分别列出双方各自的焦虑与回避分数（对应 5 题的总分 ÷ 5，保留一位小数），并依据答案解释结果，不能只聊天点评而不给结论。
+本趣味测试统一以均分 3 为分界：低于 3 为低，达到 3 为高。低焦虑+低回避→安全型；高焦虑+低回避→焦虑型；低焦虑+高回避→疏离回避型；高焦虑+高回避→恐惧回避型。先给出明确的主要倾向；分数接近分界时补充混合倾向，不把结果说成固定人格或临床诊断，也不宣称这是标准心理量表。每人的结果引用至少 2 道实际答案作为依据，最后结合双方结果给出 2—3 条具体相处建议。
+缺答时不把空白计为 0，也不编造答案或完整结果。修改答案后重新按当前值计算。若有多组追加题，按每组自己的前 5 / 后 5 题划分维度，分别报告各组结果；追加题的显示编号仍接续上一组。旧版非量表题不能硬套本计分规则，应说明缺少可计分题目，只依据实际答案解释可能倾向。`,
+      },
       { id: 'shared-zodiac', name: '星座与相处', description: '聊星座、性格和两人的相处方式。', guidance: '围绕星座、性格印象和两人的相处方式设计内容，保持轻松有角色感。' },
       { id: 'shared-nsfw', name: '私密 / NSFW', description: '更私密、更成人向的双人问题。', guidance: '本轮可以更私密、更成人向，同时保持角色设定、双方边界和自然措辞。' },
     ],
@@ -40,7 +47,7 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
     },
     prompts: {
       rules: `这是 {{char}} 与 {{user}} 共同完成的双人问卷。保持 {{char}} 的性格、措辞和关系认知。每次只推进一个自然阶段，不要替 {{user}} 填写。每道给 User 的问题都必须是一张 input 卡片，完整题干写入 input.label；title 只写题号，content 留空。`,
-      opening: `创建恰好 5 道有趣且有关系感的问题，混合使用短答、长答、单选、多选或量表。每道题同时创建一张交给 User 的 input 卡片和一张 {{char}} 已填写的 answer 卡片，共 5 对；可另加一张简短开场 text。input.label 写完整题干，title 只写题号，content 留空。single/multi 给出清晰 options，scale 给出 min、max 和两端含义。Char 答案使用 kind=answer、author=char，targetIds 引用对应 input 的 key，answer 按原题型填写字符串、选项数组或数字，不另设题型或选项。首轮就写好 Char 自己的答案，User 的输入必须保持空白。`,
+      opening: `创建恰好 10 道有趣且有关系感的问题，可使用短答、长答、单选、多选或量表。每道题同时创建一张交给 User 的 input 卡片和一张 {{char}} 已填写的 answer 卡片，共 10 对；可另加一张简短开场 text。input.label 写完整题干，title 只写题号，content 留空。single/multi 给出清晰 options，scale 给出 min、max 和两端含义。Char 答案使用 kind=answer、author=char，targetIds 引用对应 input 的 key，answer 按原题型填写字符串、选项数组或数字，不另设题型或选项。首轮就写好 Char 自己的答案，User 的输入必须保持空白。`,
       continuation: `User 点击“交给他写”后，让 {{char}} 逐题评价 User 刚填写或修改的答案。每道已回答的 User input 各生成一张 kind=review、author=char 卡片，targetIds 只填这道 User input 的 id；content 只写对这一题的评价或批改，可与 Char 自己的答案比较。不要评价尚未填写的题目，不要另建 User 评价输入位，也不要将逐题评价合并成一段总结。旧记录若缺少 Char 自己的答案，可按原题型补上 kind=answer 卡片。所有已答题都评价后可标记 complete=true，这不会阻止用户修改后再次交给他写。`,
     },
   }),
@@ -65,7 +72,7 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
     },
     prompts: {
       rules: `由 {{char}} 主持一份面向 {{user}} 的问卷。问题应符合角色性格和当前关系，不替 User 作答。每道题都必须是一张 input 卡片，完整题干写入 input.label；title 只写题号，content 留空。`,
-      opening: `以 {{char}} 的口吻创建恰好 5 道具体、有角色感的问题。除至多一张简短的 Char 开场 text 卡片外，只创建 5 张 User input 卡片。每张 input.label 必须是完整可见的题目，不能只写“请填写”“请作答”“第几题”，也不能把题干另放在 text 卡片中。题型可混用 short、long、single、multi、scale；single/multi 必须给出清晰 options，scale 必须给 min、max、minLabel、maxLabel。content 留空，绝不替 User 作答。`,
+      opening: `以 {{char}} 的口吻创建恰好 10 道具体、有角色感的问题。除至多一张简短的 Char 开场 text 卡片外，只创建 10 张 User input 卡片。每张 input.label 必须是完整可见的题目，不能只写“请填写”“请作答”“第几题”，也不能把题干另放在 text 卡片中。题型可混用 short、long、single、multi、scale；single/multi 必须给出清晰 options，scale 必须给 min、max、minLabel、maxLabel。content 留空，绝不替 User 作答。`,
       continuation: `如果 User 已回答，{{char}} 应逐题给出真诚、有角色感的评价或批改。每道已回答的 User input 各创建一张 kind=review、author=char 卡片，targetIds 只填对应的 User input id，content 只写这一题的评价，显示在该答案下方；不要把逐题评价集中写进 text。最后可额外写一段简短总结并标记完成；若仍有未答必填题，只温和提醒，不重复出题。`,
     },
   }),
@@ -125,20 +132,29 @@ export function cloneBuiltinTemplate(source: CowriteTemplate, id: string, date =
   };
 }
 
-// Upgrade only unchanged built-in prompts, including snapshots in existing records.
+// Upgrade only unchanged built-in prompts and content items. Preserve user edits and record content snapshots.
 export function upgradeBuiltinPrompts(source: CowriteTemplate): CowriteTemplate {
   const next = cloneJson(source);
   const builtin = BUILTIN_TEMPLATES.find((item) => item.id === source.id);
   if (!builtin) return next;
   const legacyOpening = '创建恰好 5 道有趣且有关系感的问题，混合使用短答、长答、单选、多选或量表。除至多一张简短的 Char 开场 text 卡片外，只创建 5 张交给 User 的 input 卡片。每张 input.label 必须包含完整、具体、可见的题目，不能只写“请填写”“第1题”等泛称，也不能用独立 text 卡片承载题干。单选/多选给出清晰 options，量表给出 min、max 和两端含义。首轮绝不替 User 回答。';
+  const legacyPairedOpening = '创建恰好 5 道有趣且有关系感的问题，混合使用短答、长答、单选、多选或量表。每道题同时创建一张交给 User 的 input 卡片和一张 {{char}} 已填写的 answer 卡片，共 5 对；可另加一张简短开场 text。input.label 写完整题干，title 只写题号，content 留空。single/multi 给出清晰 options，scale 给出 min、max 和两端含义。Char 答案使用 kind=answer、author=char，targetIds 引用对应 input 的 key，answer 按原题型填写字符串、选项数组或数字，不另设题型或选项。首轮就写好 Char 自己的答案，User 的输入必须保持空白。';
+  const legacyCharOpening = '以 {{char}} 的口吻创建恰好 5 道具体、有角色感的问题。除至多一张简短的 Char 开场 text 卡片外，只创建 5 张 User input 卡片。每张 input.label 必须是完整可见的题目，不能只写“请填写”“请作答”“第几题”，也不能把题干另放在 text 卡片中。题型可混用 short、long、single、multi、scale；single/multi 必须给出清晰 options，scale 必须给 min、max、minLabel、maxLabel。content 留空，绝不替 User 作答。';
   const legacyContinuation = '检查当前记录：如果 User 已回答首轮问题，就让 {{char}} 逐题给出自己的答案，并追加让 User 评价 Char 答案的输入位；如果 User 已完成这些评价，就由 {{char}} 评价 User 的原答案与反馈并将记录标记为完成。否则生成最合适的下一步。';
   const legacyCharContinuation = '如果 User 已回答，{{char}} 应逐题给出真诚、有角色感的评价，最后写一段总结并标记完成；若仍有未答必填题，只温和提醒，不重复出题。';
   if (source.id === 'builtin-shared-questionnaire') {
-    if (next.prompts.opening === legacyOpening) next.prompts.opening = builtin.prompts.opening;
+    if ([legacyOpening, legacyPairedOpening].includes(next.prompts.opening)) next.prompts.opening = builtin.prompts.opening;
     if (next.prompts.continuation === legacyContinuation) next.prompts.continuation = builtin.prompts.continuation;
+    const attachment = next.contentItems.find((item) => item.id === 'shared-attachment');
+    const currentAttachment = builtin.contentItems.find((item) => item.id === 'shared-attachment')!;
+    if (attachment?.guidance === '围绕依恋类型、亲密关系模式与安全感设计问题。不要直接下心理诊断结论。') {
+      attachment.guidance = currentAttachment.guidance;
+      if (attachment.description === '探索亲密关系中的依恋与安全感。') attachment.description = currentAttachment.description;
+    }
   }
-  if (source.id === 'builtin-char-questionnaire' && next.prompts.continuation === legacyCharContinuation) {
-    next.prompts.continuation = builtin.prompts.continuation;
+  if (source.id === 'builtin-char-questionnaire') {
+    if (next.prompts.opening === legacyCharOpening) next.prompts.opening = builtin.prompts.opening;
+    if (next.prompts.continuation === legacyCharContinuation) next.prompts.continuation = builtin.prompts.continuation;
   }
   return next;
 }
