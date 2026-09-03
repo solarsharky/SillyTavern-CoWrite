@@ -18,6 +18,8 @@ const entries = ref<WorldbookEntry[]>([]);
 const bookCache = ref<Record<string, WorldbookEntry[]>>({});
 const loreBusy = ref(false);
 const contextMessage = ref('');
+const globalPromptMessage = ref('');
+const connectionMessage = ref('');
 const worldbookNames = computed(() => {
   try { return window.TavernHelper?.getWorldbookNames() || []; } catch { return []; }
 });
@@ -78,6 +80,16 @@ function saveContext(): void {
   }
 }
 
+function saveGlobalPrompt(): void {
+  globalPromptMessage.value = '';
+  try {
+    store.saveSettings();
+    globalPromptMessage.value = '前置和后置 Prompt 已保存，之后所有生成请求都会使用。';
+  } catch (caught) {
+    globalPromptMessage.value = caught instanceof Error ? caught.message : String(caught);
+  }
+}
+
 function add(): void {
   connections.value.push(store.addConnection());
 }
@@ -88,8 +100,13 @@ function remove(id: string): void {
 }
 
 async function save(): Promise<void> {
-  await store.saveConnections(connections.value);
-  store.saveSettings();
+  connectionMessage.value = '';
+  try {
+    await store.saveConnections(connections.value);
+    connectionMessage.value = 'API 连接和输出模式已保存。';
+  } catch (caught) {
+    connectionMessage.value = caught instanceof Error ? caught.message : String(caught);
+  }
 }
 
 async function test(profile: ConnectionProfile): Promise<void> {
@@ -166,6 +183,24 @@ async function restore(event: Event): Promise<void> {
       <p v-if="contextMessage" class="cw-help">{{ contextMessage }}</p>
     </section>
 
+    <section class="cw-paper-section cw-global-prompt">
+      <div class="cw-section-title"><div><span class="cw-kicker">GLOBAL PROMPT</span><h2>全局 Prompt</h2></div></div>
+      <p>开头和结尾分别填写，可以同时生效。应用于所有分类、新旧记录，以及重roll、补题、自动修复和长记录摘要；留空的位置不会插入内容。</p>
+      <label class="cw-choice"><input v-model="settings.globalPrompt.enabled" type="checkbox" /><span>启用全局 Prompt</span></label>
+      <div class="cw-form-grid cw-global-prompt__fields">
+        <label class="cw-span-all">最开头的 Prompt
+          <textarea v-model="settings.globalPrompt.prefix" class="cw-field cw-field--long" rows="5" placeholder="放在其他所有提示词之前，可单独填写…" />
+        </label>
+        <label class="cw-span-all">最结尾的 Prompt
+          <textarea v-model="settings.globalPrompt.suffix" class="cw-field cw-field--long" rows="5" placeholder="放在其他所有提示词和当前记录之后，可与开头同时填写…" />
+        </label>
+      </div>
+      <p class="cw-help">发送顺序：最开头的 Prompt → 其他提示词与当前记录 → 最结尾的 Prompt。暂停启用时仍会保留已填写的内容。</p>
+      <p class="cw-help">支持变量：<span v-pre>{{char}}、{{user}}、{{round}}、{{record_title}}</span>。</p>
+      <button class="cw-button cw-button--primary" @click="saveGlobalPrompt">保存全局 Prompt</button>
+      <p v-if="globalPromptMessage" class="cw-help" role="status">{{ globalPromptMessage }}</p>
+    </section>
+
     <section class="cw-paper-section">
       <div class="cw-section-title">
         <div><span class="cw-kicker">CONNECTIONS</span><h2>生成连接</h2></div>
@@ -176,7 +211,7 @@ async function restore(event: Event): Promise<void> {
       <article v-for="profile in connections" :key="profile.id" class="cw-connection">
         <template v-if="profile.type === 'st'">
           <div><b>{{ profile.name }}</b><p>使用 SillyTavern 当前连接与预设，不保存额外密钥。</p></div>
-          <span class="cw-chip">只读</span>
+          <span class="cw-chip">酒馆连接</span>
         </template>
         <template v-else>
           <div class="cw-form-grid cw-span-all">
@@ -193,6 +228,13 @@ async function restore(event: Event): Promise<void> {
             <button class="cw-small-btn cw-small-btn--danger" @click="remove(profile.id)">移除</button>
           </div>
         </template>
+        <label class="cw-connection-mode">输出模式
+          <select v-model="profile.streaming" class="cw-field" :aria-label="`${profile.name}的输出模式`">
+            <option :value="false">非流式输出</option>
+            <option :value="true">流式输出</option>
+          </select>
+          <small>流式会显示接收进度；完整结果返回后统一显示题目。适用于这个连接的所有请求。</small>
+        </label>
       </article>
       <p v-if="testMessage" class="cw-help">{{ testMessage }}</p>
       <div class="cw-form-grid">
@@ -204,6 +246,7 @@ async function restore(event: Event): Promise<void> {
         <label class="cw-choice cw-choice--setting"><input v-model="settings.ui.edgeTuck" type="checkbox" /><span>悬浮按钮靠边时自动收纳</span></label>
       </div>
       <button class="cw-button cw-button--primary" @click="save">保存设置</button>
+      <p v-if="connectionMessage" class="cw-help" role="status">{{ connectionMessage }}</p>
     </section>
 
     <section class="cw-paper-section">
@@ -219,7 +262,7 @@ async function restore(event: Event): Promise<void> {
 
     <section class="cw-paper-section">
       <span class="cw-kicker">ABOUT</span>
-      <h2>共笔 v0.1.0-beta.8</h2>
+      <h2>共笔 v0.1.0-beta.9</h2>
       <p>作者 SolarShark · MIT License</p>
       <a href="https://github.com/solarsharky/SillyTavern-CoWrite/issues" target="_blank" rel="noreferrer">反馈问题或建议 ↗</a>
     </section>

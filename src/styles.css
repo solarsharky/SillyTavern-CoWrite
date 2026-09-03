@@ -264,6 +264,8 @@
 .cw-dependency-list dd { margin: 4px 0 0; font-weight: 700; }
 .cw-connection { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin: 12px 0; padding: 14px; border: 1px dashed var(--cw-line); border-radius: 10px; background: rgba(255,255,255,.28); }
 .cw-connection p { margin: 4px 0 0; font-size: 12px; }
+.cw-connection-mode { display: grid; flex: 1 0 100%; gap: 6px; color: var(--cw-muted); font-size: 12px; }
+.cw-global-prompt__fields { margin-top: 14px; }
 .cw-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
 .cw-form-grid label, .cw-editor-section > label { display: grid; align-content: start; gap: 5px; color: var(--cw-muted); font-size: 12px; }
 .cw-span-2, .cw-span-all { grid-column: 1 / -1; }

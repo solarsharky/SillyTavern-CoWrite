@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue';
 import { defineStore } from 'pinia';
-import { GenerationOutputError, TavernGenerationGateway } from '../adapters/generation';
+import { GenerationOutputError, TavernGenerationGateway, type GenerationProgress } from '../adapters/generation';
 import { AccountFileRepository, LocalSecretVault } from '../adapters/repository';
 import { TavernBridge, compareVersion } from '../adapters/tavern';
 import { ActivityEngine, type EngineResult } from '../core/engine';
@@ -30,7 +30,8 @@ export const useCowriteStore = defineStore('cowrite', () => {
   const tavern = new TavernBridge();
   const repository = new AccountFileRepository();
   const secrets = new LocalSecretVault();
-  const gateway = new TavernGenerationGateway(tavern);
+  const generationProgress = ref<GenerationProgress | null>(null);
+  const gateway = new TavernGenerationGateway(tavern, (progress) => { generationProgress.value = progress; });
 
   const initialized = ref(false);
   const busy = ref(false);
@@ -55,6 +56,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
     repository,
     gateway,
     tavern,
+    getGlobalPrompt: () => settings.globalPrompt,
     resolveConnection(id) {
       const requestedId = id === 'default' ? settings.defaultConnectionId : id;
       const profile = settings.connections.find((item) => item.id === requestedId)
@@ -302,6 +304,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
     return {
       id: crypto.randomUUID(), type: 'custom', name: '新连接', apiUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini',
       temperature: 0.8, maxTokens: 4096, rememberKey: false,
+      streaming: false,
     };
   }
 
@@ -420,6 +423,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
       ...(saved || {}),
       ui: { ...DEFAULT_SETTINGS.ui, ...(saved?.ui || {}) },
       generationContext: { ...DEFAULT_SETTINGS.generationContext, ...(saved?.generationContext || {}) },
+      globalPrompt: { ...DEFAULT_SETTINGS.globalPrompt, ...(saved?.globalPrompt || {}) },
       connections: saved?.connections || DEFAULT_SETTINGS.connections,
     };
     Object.assign(settings, SettingsSchema.parse(merged));
@@ -448,7 +452,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
   }
 
   return {
-    initialized, busy, open, tab, error, notices, rawOutput, records, unsyncedRecordIds, templates, selectedRecordId,
+    initialized, busy, generationProgress, open, tab, error, notices, rawOutput, records, unsyncedRecordIds, templates, selectedRecordId,
     characterId, characterName, helperVersion, settings, sessionKeys, selectedRecord, visibleRecords,
     canGenerate, persistedTemplates, initialize, refreshCharacter, start, continueRecord, stopGeneration,
     commitInput, reroll, clearAnswers, toggleRecordStar, generateMore, removeRecord, retrySync, rebindRecord, saveTemplate,

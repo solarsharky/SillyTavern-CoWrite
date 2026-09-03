@@ -13,7 +13,7 @@ import { isInputAnswered } from './domain/schema';
 
 const store = useCowriteStore();
 const {
-  busy, open, tab, error, notices, rawOutput, records, unsyncedRecordIds, templates, selectedRecordId, selectedRecord,
+  busy, generationProgress, open, tab, error, notices, rawOutput, records, unsyncedRecordIds, templates, selectedRecordId, selectedRecord,
   characterId, characterName, settings, canGenerate,
 } = storeToRefs(store);
 
@@ -37,6 +37,13 @@ const filteredRecords = computed(() => records.value.filter((record) => {
 const canEditRecord = computed(() => canGenerate.value && selectedRecord.value?.characterId === characterId.value);
 const latestCycle = computed(() => [...(selectedRecord.value?.cycles || [])].reverse().find((cycle) => cycle.status === 'applied'));
 const moreLabel = computed(() => selectedRecord.value?.templateId === 'builtin-exchange-diary' ? '再写一页' : '生成更多题');
+const generationLabel = computed(() => {
+  const progress = generationProgress.value;
+  if (!progress) return `正在和 ${characterName.value} 商量下一页…`;
+  const phase = progress.phase === 'summary' ? '正在整理前文' : progress.phase === 'repair' ? '正在校正格式' : '正在生成';
+  if (!progress.streaming) return `${phase} · 非流式`;
+  return progress.receivedCharacters ? `${phase} · 已接收 ${progress.receivedCharacters} 字符` : `${phase} · 等待流式输出…`;
+});
 
 let pointerId = -1;
 let dragStart = { x: 0, y: 0, left: 0, top: 0 };
@@ -308,7 +315,7 @@ function dateLabel(value: string): string {
           <SettingsPanel v-else />
         </div>
 
-        <div v-if="busy" class="cw-busy"><span class="cw-busy__pen">✒</span><p>正在和 {{ characterName }} 商量下一页…</p><button class="cw-small-btn cw-small-btn--danger" @click="store.stopGeneration">停止本轮</button></div>
+        <div v-if="busy" class="cw-busy"><span class="cw-busy__pen">✒</span><p>{{ generationLabel }}</p><button class="cw-small-btn cw-small-btn--danger" @click="store.stopGeneration">停止本轮</button></div>
         <div v-if="templateEditor" class="cw-editor-layer"><TemplateEditor :model-value="templateEditor" @save="saveTemplate" @close="templateEditor = null" /></div>
         <div v-if="contentEditor" class="cw-editor-layer"><ContentItemEditor :model-value="contentEditor.item" :category-name="contentEditor.template.name" @save="saveContentItem" @close="contentEditor = null" /></div>
       </main>

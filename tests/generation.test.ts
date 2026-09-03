@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GenerationOutputError, GenerationStoppedError, parseGenerationPatch, TavernGenerationGateway, withTimeout } from '../src/adapters/generation';
+import { GenerationOutputError, GenerationStoppedError, parseGenerationPatch, TavernGenerationGateway, withTimeout, type GenerationProgress } from '../src/adapters/generation';
 import type { TavernBridge } from '../src/adapters/tavern';
 import type { ConnectionProfile } from '../src/domain/schema';
 import { makeQuestionPatch, makeRecord, makeTemplate } from './fixtures';
@@ -10,11 +10,15 @@ function setup(responses: Array<string | Promise<string>>) {
   const generateRaw = vi.fn();
   for (const response of responses) generateRaw.mockImplementationOnce(() => Promise.resolve(response));
   const stopGenerationById = vi.fn(async () => true);
-  const tavern = { helper: { generateRaw, stopGenerationById } } as unknown as TavernBridge;
-  return { gateway: new TavernGenerationGateway(tavern), generateRaw, stopGenerationById };
+  let streamListener: ((text: string, id: string) => void) | undefined;
+  const unsubscribe = vi.fn();
+  const subscribeToStream = vi.fn((listener: (text: string, id: string) => void) => { streamListener = listener; return unsubscribe; });
+  const onProgress = vi.fn<(progress: GenerationProgress | null) => void>();
+  const tavern = { helper: { generateRaw, stopGenerationById }, subscribeToStream } as unknown as TavernBridge;
+  return { gateway: new TavernGenerationGateway(tavern, onProgress), generateRaw, stopGenerationById, subscribeToStream, unsubscribe, onProgress, emitStream: (text: string, id: string) => streamListener?.(text, id) };
 }
 
-function options(connection: ConnectionProfile = { id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true }) {
+function options(connection: ConnectionProfile = { id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true, streaming: false }) {
   return { template: makeTemplate({ id: 'test-format' }), record: makeRecord(), stage: 'opening' as const, connection, apiKey: connection.type === 'custom' ? 'secret' : undefined, manualLore: '' };
 }
 
@@ -53,7 +57,7 @@ describe('生成网关', () => {
 
   it('独立连接仅在请求时带上密钥与参数', async () => {
     const { gateway, generateRaw } = setup([valid]);
-    const custom: ConnectionProfile = { id: 'c1', type: 'custom', name: '私有', apiUrl: 'https://example.com/v1', model: 'm', temperature: .4, maxTokens: 1000, rememberKey: false };
+    const custom: ConnectionProfile = { id: 'c1', type: 'custom', name: '私有', apiUrl: 'https://example.com/v1', model: 'm', temperature: .4, maxTokens: 1000, rememberKey: false, streaming: false };
     await gateway.generatePatch(options(custom));
     expect(generateRaw.mock.calls[0]?.[0].custom_api).toMatchObject({ apiurl: custom.apiUrl, key: 'secret', model: 'm' });
   });
@@ -135,5 +139,64 @@ describe('生成网关', () => {
     expect(outcome).toBeInstanceOf(Error);
     expect((outcome as Error).message).toContain('已停止且未写入');
     expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it.each([true, false])('流式=%s 时主生成、修复与摘要都应用连接设置和首尾 Prompt', async (streaming) => {
+    const { gateway, generateRaw, subscribeToStream } = setup(['invalid', valid, '{"summary":"前情"}']);
+    const config = { ...options(), globalPrompt: { enabled: true, prefix: '开头：请用{{char}}的口吻。', suffix: '结尾：请使用中文。' } };
+    config.connection.streaming = streaming;
+    await gateway.generatePatch(config);
+    await gateway.summarize(config, '待摘要内容');
+    expect(generateRaw).toHaveBeenCalledTimes(3);
+    for (const [request] of generateRaw.mock.calls) {
+      expect(request.should_stream).toBe(streaming);
+      expect(request.should_silence).toBe(true);
+      expect(request.ordered_prompts[0]).toEqual({ role: 'system', content: '开头：请用阿澜的口吻。' });
+      expect(request.ordered_prompts.at(-1)).toEqual({ role: 'system', content: '结尾：请使用中文。' });
+      expect(request.ordered_prompts.at(-2)).toBe('user_input');
+      expect(request.ordered_prompts.filter((prompt: unknown) => typeof prompt === 'object' && JSON.stringify(prompt).includes('开头：'))).toHaveLength(1);
+    }
+    expect(subscribeToStream).toHaveBeenCalledTimes(streaming ? 3 : 0);
+  });
+
+  it('独立 API 也可以启用流式输出', async () => {
+    const { gateway, generateRaw } = setup([valid]);
+    await gateway.generatePatch(options({ id: 'c1', type: 'custom', name: '私有', apiUrl: 'https://example.com/v1', model: 'm', temperature: .4, maxTokens: 1000, rememberKey: false, streaming: true }));
+    expect(generateRaw.mock.calls[0]?.[0].should_stream).toBe(true);
+    expect(generateRaw.mock.calls[0]?.[0].custom_api.model).toBe('m');
+  });
+
+  it('流式只更新本次请求进度，停止后移除监听并丢弃迟到响应', async () => {
+    let finish!: (value: string) => void;
+    const pending = new Promise<string>((resolve) => { finish = resolve; });
+    const { gateway, generateRaw, emitStream, unsubscribe, onProgress } = setup([pending]);
+    const config = options();
+    config.connection.streaming = true;
+    const request = gateway.generatePatch(config).catch((error) => error as Error);
+    await vi.waitFor(() => expect(generateRaw).toHaveBeenCalledOnce());
+    const id = generateRaw.mock.calls[0]![0].generation_id;
+    emitStream('别的插件正在生成', 'other-generation');
+    expect(onProgress).toHaveBeenLastCalledWith({ phase: 'writing', streaming: true, receivedCharacters: 0 });
+    emitStream('正在回答', id);
+    expect(onProgress).toHaveBeenLastCalledWith({ phase: 'writing', streaming: true, receivedCharacters: 4 });
+    await gateway.stop();
+    expect(await request).toBeInstanceOf(GenerationStoppedError);
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(onProgress).toHaveBeenLastCalledWith(null);
+    onProgress.mockClear();
+    emitStream('迟到的输出', id);
+    finish(valid);
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it('流式请求同步失败时也会清理监听和生成状态', async () => {
+    const { gateway, generateRaw, unsubscribe, onProgress } = setup([]);
+    generateRaw.mockImplementationOnce(() => { throw new Error('请求失败'); });
+    const config = options();
+    config.connection.streaming = true;
+    await expect(gateway.generatePatch(config)).rejects.toThrow('请求失败');
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(onProgress).toHaveBeenLastCalledWith(null);
+    expect(await gateway.stop()).toBe(false);
   });
 });

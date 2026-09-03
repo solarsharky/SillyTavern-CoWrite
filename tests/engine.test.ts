@@ -3,13 +3,13 @@ import { ActivityEngine, applyPatch } from '../src/core/engine';
 import type { GenerationGateway } from '../src/adapters/generation';
 import type { RecordRepository } from '../src/adapters/repository';
 import type { TavernBridge } from '../src/adapters/tavern';
-import type { ConnectionProfile } from '../src/domain/schema';
+import type { ConnectionProfile, GlobalPrompt } from '../src/domain/schema';
 import { makeQuestionPatch, makeRecord, makeTemplate } from './fixtures';
 
-const connection: ConnectionProfile = { id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true };
+const connection: ConnectionProfile = { id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true, streaming: false };
 const generatedPatch = { complete: false, blocks: [{ key: 'a', kind: 'text' as const, author: 'char' as const, title: '', content: '生成内容', targetIds: [] }] };
 
-function setup(overrides: { tokens?: number; summarize?: () => Promise<string> } = {}) {
+function setup(overrides: { tokens?: number; summarize?: () => Promise<string>; getGlobalPrompt?: () => GlobalPrompt } = {}) {
   const repository = {
     saveRecord: vi.fn(async () => ({ synced: true })),
   } as unknown as RecordRepository;
@@ -24,7 +24,7 @@ function setup(overrides: { tokens?: number; summarize?: () => Promise<string> }
     countTokens: vi.fn(async () => overrides.tokens ?? 10),
     maxContext: vi.fn(() => 32768),
   } as unknown as TavernBridge;
-  const engine = new ActivityEngine({ repository, gateway, tavern, resolveConnection: () => ({ profile: connection }) });
+  const engine = new ActivityEngine({ repository, gateway, tavern, resolveConnection: () => ({ profile: connection }), getGlobalPrompt: overrides.getGlobalPrompt });
   return { engine, repository, gateway, tavern };
 }
 
@@ -64,6 +64,23 @@ describe('ActivityEngine 深模块', () => {
     await expect(engine.continue(record)).rejects.toThrow('摘要失败');
     expect(gateway.generatePatch).not.toHaveBeenCalled();
     expect(repository.saveRecord).not.toHaveBeenCalled();
+  });
+
+  it('同一次生成的摘要和主请求使用一致的全局 Prompt，下一次请求读取最新设置', async () => {
+    let record = makeRecord();
+    for (let index = 0; index < 5; index += 1) record = applyPatch(record, generatedPatch, index ? 'continuation' : 'opening');
+    const globalPrompt = { enabled: true, prefix: '前置', suffix: '后置' };
+    const { engine, gateway } = setup({
+      tokens: 20_000,
+      getGlobalPrompt: () => globalPrompt,
+      summarize: async () => { globalPrompt.suffix = '之后使用的新后置'; return '摘要'; },
+    });
+    const result = await engine.continue(record);
+    expect(vi.mocked(gateway.summarize).mock.calls[0]?.[0].globalPrompt?.suffix).toBe('后置');
+    expect(vi.mocked(gateway.generatePatch).mock.calls[0]?.[0].globalPrompt?.suffix).toBe('后置');
+    await engine.continue(result.record);
+    expect(vi.mocked(gateway.generatePatch).mock.calls[1]?.[0].globalPrompt?.suffix).toBe('之后使用的新后置');
+    expect(result.record.templateSnapshot).not.toHaveProperty('globalPrompt');
   });
 
   it('读取世界书期间停止也会取消整轮且不保存', async () => {

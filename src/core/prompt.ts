@@ -1,7 +1,15 @@
-import type { Block, CowriteRecord, CowriteTemplate } from '../domain/schema';
+import type { Block, CowriteRecord, CowriteTemplate, GlobalPrompt } from '../domain/schema';
 import { isInputAnswered } from '../domain/schema';
 
 export type GenerationStage = 'opening' | 'continuation' | 'more';
+
+export function withGlobalPrompts(prompts: CowriteOrderedPrompt[], globalPrompt: GlobalPrompt | undefined, record: CowriteRecord): CowriteOrderedPrompt[] {
+  const result = [...prompts];
+  if (!globalPrompt?.enabled) return result;
+  if (globalPrompt.prefix.trim()) result.unshift({ role: 'system', content: expandPrompt(globalPrompt.prefix, record) });
+  if (globalPrompt.suffix.trim()) result.push({ role: 'system', content: expandPrompt(globalPrompt.suffix, record) });
+  return result;
+}
 
 export function expandPrompt(text: string, record: CowriteRecord): string {
   return text

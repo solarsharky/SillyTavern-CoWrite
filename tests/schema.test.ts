@@ -17,6 +17,8 @@ describe('追加事务与所有权', () => {
     const settings = SettingsSchema.parse({ schemaVersion: 1, enabled: true, defaultConnectionId: 'st-main', starredTemplateIds: [], connections: [{ id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true }], ui: { x: null, y: null, edgeTuck: true } });
     expect(settings.generationContext.recentChatCount).toBe(12);
     expect(settings.hiddenTemplateIds).toEqual([]);
+    expect(settings.globalPrompt).toEqual({ enabled: true, prefix: '', suffix: '' });
+    expect(settings.connections[0]?.streaming).toBe(false);
   });
 
   it('内置格式分类各自包含可独立增删的内容项', () => {

@@ -213,6 +213,7 @@ export const ConnectionProfileSchema = z.discriminatedUnion('type', [
     type: z.literal('st'),
     name: z.string(),
     readonly: z.literal(true),
+    streaming: z.boolean().default(false),
   }),
   z.object({
     id: z.string().min(1),
@@ -223,9 +224,17 @@ export const ConnectionProfileSchema = z.discriminatedUnion('type', [
     temperature: z.number().min(0).max(2).default(0.8),
     maxTokens: z.number().int().min(64).max(131072).default(4096),
     rememberKey: z.boolean().default(false),
+    streaming: z.boolean().default(false),
   }),
 ]);
 export type ConnectionProfile = z.infer<typeof ConnectionProfileSchema>;
+
+export const GlobalPromptSchema = z.object({
+  enabled: z.boolean().default(true),
+  prefix: z.string().default(''),
+  suffix: z.string().default(''),
+});
+export type GlobalPrompt = z.infer<typeof GlobalPromptSchema>;
 
 export const SettingsSchema = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
@@ -233,6 +242,7 @@ export const SettingsSchema = z.object({
   defaultConnectionId: z.string().default('st-main'),
   starredTemplateIds: z.array(z.string()).default([]),
   hiddenTemplateIds: z.array(z.string()).default([]),
+  globalPrompt: GlobalPromptSchema.default({ enabled: true, prefix: '', suffix: '' }),
   generationContext: GenerationContextSchema.default({
     recentChatCount: 12,
     worldInfoMode: 'active',

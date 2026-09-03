@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildStagePrompt, expandPrompt, serializeRecordForModel } from '../src/core/prompt';
+import { buildStagePrompt, expandPrompt, serializeRecordForModel, withGlobalPrompts } from '../src/core/prompt';
 import { applyPatch } from '../src/core/engine';
 import { makeRecord, makeTemplate } from './fixtures';
 
@@ -7,6 +7,17 @@ describe('上下文与提示词', () => {
   it('展开角色、用户、轮次和标题变量', () => {
     const record = makeRecord();
     expect(expandPrompt('{{char}}/{{user}}/{{round}}/{{record_title}}', record)).toBe('阿澜/小鱼/1/一起回答的问题');
+  });
+
+  it('首尾 Prompt 同时包住全部消息，禁用或留空时不改变原顺序', () => {
+    const prompts: CowriteOrderedPrompt[] = [{ role: 'system', content: '协议' }, 'char_description', 'user_input'];
+    const global = { enabled: true, prefix: '开头 {{char}}', suffix: '结尾 {{user}}' };
+    const wrapped = withGlobalPrompts(prompts, global, makeRecord());
+    expect(wrapped).toEqual([{ role: 'system', content: '开头 阿澜' }, ...prompts, { role: 'system', content: '结尾 小鱼' }]);
+    expect(prompts).toHaveLength(3);
+    expect(withGlobalPrompts(prompts, { ...global, enabled: false }, makeRecord())).toEqual(prompts);
+    expect(withGlobalPrompts(prompts, { enabled: true, prefix: ' \n ', suffix: '' }, makeRecord())).toEqual(prompts);
+    expect(withGlobalPrompts(prompts, { ...global, prefix: '' }, makeRecord())).toEqual([...prompts, { role: 'system', content: '结尾 小鱼' }]);
   });
 
   it('把记录放进明确的数据边界', () => {

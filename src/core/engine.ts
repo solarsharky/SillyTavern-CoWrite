@@ -12,6 +12,7 @@ import {
   type CowriteTemplate,
   type GenerationPatch,
   type InputConfig,
+  type GlobalPrompt,
   InputValueSchema,
   InputConfigSchema,
 } from '../domain/schema';
@@ -30,6 +31,7 @@ export interface ActivityEngineDependencies {
   gateway: GenerationGateway;
   tavern: TavernBridge;
   resolveConnection(id: string): { profile: ConnectionProfile; apiKey?: string };
+  getGlobalPrompt?(): GlobalPrompt;
 }
 
 export class ActivityEngine {
@@ -151,16 +153,18 @@ export class ActivityEngine {
         throw new Error(`手选世界书约 ${manualLore.tokenCount} tokens，超过模板预算 ${template.context.manualLoreTokenBudget}。请减少条目或提高预算。`);
       }
       const resolved = this.deps.resolveConnection(template.connectionId);
-      await this.summarizeIfNeeded(record, resolved.profile, resolved.apiKey, manualLore.content);
-      this.assertNotStopped();
-      const patch = await this.deps.gateway.generatePatch({
+      const globalPrompt = this.deps.getGlobalPrompt?.();
+      const options: Omit<GenerateOptions, 'stage'> = {
         template,
         record,
-        stage,
-        connection: resolved.profile,
+        connection: cloneJson(resolved.profile),
         apiKey: resolved.apiKey,
         manualLore: manualLore.content,
-      });
+        globalPrompt: globalPrompt ? cloneJson(globalPrompt) : undefined,
+      };
+      await this.summarizeIfNeeded(options);
+      this.assertNotStopped();
+      const patch = await this.deps.gateway.generatePatch({ ...options, stage });
       this.assertNotStopped();
       const next = applyPatch(record, patch, stage);
       const save = await this.deps.repository.saveRecord(next);
@@ -178,7 +182,8 @@ export class ActivityEngine {
     if (this.stopRequested) throw new GenerationStoppedError();
   }
 
-  private async summarizeIfNeeded(record: CowriteRecord, connection: ConnectionProfile, apiKey: string | undefined, manualLore: string): Promise<void> {
+  private async summarizeIfNeeded(options: Omit<GenerateOptions, 'stage'>): Promise<void> {
+    const { record } = options;
     const serialized = serializeRecordForModel(record);
     const tokens = await this.deps.tavern.countTokens(serialized);
     const budget = Math.min(record.templateSnapshot.context.recordTokenBudget, 12000, Math.floor(this.deps.tavern.maxContext() * 0.4));
@@ -196,8 +201,6 @@ export class ActivityEngine {
       previousSummary: record.rollingSummary || undefined,
       blocks: record.blocks.filter((block) => eligibleIds.has(block.cycleId)),
     }, null, 2);
-    const template = record.templateSnapshot;
-    const options: Omit<GenerateOptions, 'stage'> = { template, record, connection, apiKey, manualLore };
     record.rollingSummary = await this.deps.gateway.summarize(options, source);
     record.summaryThroughCycle = eligible.at(-1)?.id || '';
     record.updatedAt = new Date().toISOString();

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { jsonrepair } from 'jsonrepair';
-import { GenerationPatchSchema, type ConnectionProfile, type CowriteRecord, type CowriteTemplate, type GenerationPatch } from '../domain/schema';
-import { buildStagePrompt, type GenerationStage } from '../core/prompt';
+import { GenerationPatchSchema, type ConnectionProfile, type CowriteRecord, type CowriteTemplate, type GenerationPatch, type GlobalPrompt } from '../domain/schema';
+import { buildStagePrompt, withGlobalPrompts, type GenerationStage } from '../core/prompt';
 import { DEFAULT_PROTOCOL, PATCH_JSON_SCHEMA, SUMMARY_JSON_SCHEMA } from '../core/protocol';
 import type { TavernBridge } from './tavern';
 import { BUILTIN_TEMPLATES } from '../domain/defaults';
@@ -15,6 +15,13 @@ export interface GenerateOptions {
   connection: ConnectionProfile;
   apiKey?: string;
   manualLore: string;
+  globalPrompt?: GlobalPrompt;
+}
+
+export interface GenerationProgress {
+  phase: 'writing' | 'summary' | 'repair';
+  streaming: boolean;
+  receivedCharacters: number;
 }
 
 export interface GenerationGateway {
@@ -28,22 +35,16 @@ export class TavernGenerationGateway implements GenerationGateway {
   private readonly cancelledGenerationIds = new Set<string>();
   private activeCancellation: { id: string; cancel: () => void } | null = null;
 
-  constructor(private readonly tavern: TavernBridge) {}
+  constructor(private readonly tavern: TavernBridge, private readonly onProgress?: (progress: GenerationProgress | null) => void) {}
 
   async generatePatch(options: GenerateOptions): Promise<GenerationPatch> {
-    const generationId = crypto.randomUUID();
-    this.activeGenerationId = generationId;
     const protocol = options.template.advancedProtocol?.trim() || DEFAULT_PROTOCOL;
-    const raw = await this.awaitResponse(generationId, this.tavern.helper.generateRaw({
-      generation_id: generationId,
+    const raw = await this.request(options, 'writing', {
       user_input: buildStagePrompt(options.template, options.record, options.stage),
       ordered_prompts: this.orderedPrompts(options.template, protocol, options.manualLore),
-      should_stream: false,
-      should_silence: true,
       max_chat_history: options.template.context.recentChatCount,
-      custom_api: customApi(options.connection, options.apiKey),
       json_schema: PATCH_JSON_SCHEMA,
-    }));
+    });
 
     const text = extractContent(raw);
     try {
@@ -54,18 +55,12 @@ export class TavernGenerationGateway implements GenerationGateway {
   }
 
   async summarize(options: Omit<GenerateOptions, 'stage'>, source: string): Promise<string> {
-    const generationId = crypto.randomUUID();
-    this.activeGenerationId = generationId;
-    const raw = await this.awaitResponse(generationId, this.tavern.helper.generateRaw({
-      generation_id: generationId,
+    const raw = await this.request(options, 'summary', {
       user_input: `请把以下共笔早期记录压缩成忠实、可供后续继续写作的摘要。保留关系变化、重要答案、未解决话题和双方语气，不添加新事实。\n\n<record_data>\n${source}\n</record_data>`,
       ordered_prompts: [{ role: 'system', content: '只返回 JSON：{"summary":"..."}。' }, 'user_input'],
-      should_stream: false,
-      should_silence: true,
       max_chat_history: 0,
-      custom_api: customApi(options.connection, options.apiKey),
       json_schema: SUMMARY_JSON_SCHEMA,
-    }));
+    });
     const parsed = z.object({ summary: z.string().min(1).max(12000) }).parse(parseJson(extractContent(raw)));
     return parsed.summary;
   }
@@ -94,18 +89,12 @@ export class TavernGenerationGateway implements GenerationGateway {
 
   private async repairPatch(raw: string, validationError: unknown, options: GenerateOptions): Promise<GenerationPatch> {
     const errorText = validationError instanceof Error ? validationError.message : String(validationError);
-    const repairId = crypto.randomUUID();
-    this.activeGenerationId = repairId;
-    const repaired = await this.awaitResponse(repairId, this.tavern.helper.generateRaw({
-      generation_id: repairId,
+    const repaired = await this.request(options, 'repair', {
       user_input: `下列输出无法通过共笔协议。请只修复结构，不改变原意，不补写 User 答案。\n校验错误：${errorText}\n\n原始输出：\n${raw}`,
       ordered_prompts: [{ role: 'system', content: DEFAULT_PROTOCOL }, 'user_input'],
-      should_stream: false,
-      should_silence: true,
       max_chat_history: 0,
-      custom_api: customApi(options.connection, options.apiKey),
       json_schema: PATCH_JSON_SCHEMA,
-    }));
+    });
     try {
       return parsePatchForRequest(extractContent(repaired), options);
     } catch (repairError) {
@@ -113,12 +102,40 @@ export class TavernGenerationGateway implements GenerationGateway {
     }
   }
 
-  private async awaitResponse(generationId: string, request: Promise<string | { content: string }>): Promise<string | { content: string }> {
+  private async request(options: Omit<GenerateOptions, 'stage'>, phase: GenerationProgress['phase'], config: TavernHelperGenerateConfig): Promise<string | { content: string }> {
+    const generationId = crypto.randomUUID();
+    const streaming = options.connection.streaming;
+    this.activeGenerationId = generationId;
+    let unsubscribe = () => {};
+    try {
+      this.onProgress?.({ phase, streaming, receivedCharacters: 0 });
+      if (streaming) {
+        unsubscribe = this.tavern.subscribeToStream((text, id) => {
+          if (id !== generationId || this.activeGenerationId !== id || this.cancelledGenerationIds.has(id) || typeof text !== 'string') return;
+          this.onProgress?.({ phase, streaming, receivedCharacters: text.length });
+        });
+      }
+      return await this.awaitResponse(generationId, () => this.tavern.helper.generateRaw({
+        ...config,
+        generation_id: generationId,
+        ordered_prompts: withGlobalPrompts(config.ordered_prompts || ['user_input'], options.globalPrompt, options.record),
+        should_stream: streaming,
+        should_silence: true,
+        custom_api: customApi(options.connection, options.apiKey),
+      }));
+    } finally {
+      unsubscribe();
+      if (this.activeGenerationId === generationId) this.activeGenerationId = '';
+      this.onProgress?.(null);
+    }
+  }
+
+  private async awaitResponse(generationId: string, request: () => Promise<string | { content: string }>): Promise<string | { content: string }> {
     const cancellation = new Promise<never>((_, reject) => {
       this.activeCancellation = { id: generationId, cancel: () => reject(new GenerationStoppedError()) };
     });
     try {
-      const response = await withTimeout(Promise.race([request, cancellation]), GENERATION_TIMEOUT_MS, () => this.tavern.helper.stopGenerationById(generationId));
+      const response = await withTimeout(Promise.race([request(), cancellation]), GENERATION_TIMEOUT_MS, () => this.tavern.helper.stopGenerationById(generationId));
       if (this.cancelledGenerationIds.has(generationId)) throw new GenerationStoppedError();
       return response;
     } catch (error) {

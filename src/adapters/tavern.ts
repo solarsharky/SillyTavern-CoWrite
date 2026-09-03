@@ -58,6 +58,14 @@ export class TavernBridge {
     return Math.ceil(text.length / 3);
   }
 
+  subscribeToStream(listener: (text: string, generationId: string) => void): () => void {
+    const events = this.getContext().eventSource;
+    if (!events?.removeListener) return () => {};
+    const event = 'js_stream_token_received_fully';
+    events.on(event, listener);
+    return () => events.removeListener?.(event, listener);
+  }
+
   getWorldbookNames(): string[] {
     return this.helper.getWorldbookNames();
   }

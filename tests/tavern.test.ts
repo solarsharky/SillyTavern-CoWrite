@@ -9,6 +9,18 @@ describe('酒馆助手适配', () => {
     expect(compareVersion('4.9.2', '4.9.3')).toBe(-1);
   });
 
+  it('订阅酒馆助手的完整流式文本事件，并按原监听器取消订阅', () => {
+    const bridge = new TavernBridge();
+    const on = vi.fn();
+    const removeListener = vi.fn();
+    vi.spyOn(bridge, 'getContext').mockReturnValue({ ...window.SillyTavern!.getContext(), eventSource: { on, removeListener } });
+    const listener = vi.fn();
+    const unsubscribe = bridge.subscribeToStream(listener);
+    expect(on).toHaveBeenCalledWith('js_stream_token_received_fully', listener);
+    unsubscribe();
+    expect(removeListener).toHaveBeenCalledWith('js_stream_token_received_fully', listener);
+  });
+
   it('手选世界书只注入仍存在且启用的条目并估算 tokens', async () => {
     const bridge = new TavernBridge();
     vi.spyOn(bridge, 'getWorldbook').mockResolvedValue([

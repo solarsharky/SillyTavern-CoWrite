@@ -102,6 +102,7 @@ export const DEFAULT_SETTINGS: CowriteSettings = {
   defaultConnectionId: 'st-main',
   starredTemplateIds: [],
   hiddenTemplateIds: [],
+  globalPrompt: { enabled: true, prefix: '', suffix: '' },
   generationContext: {
     recentChatCount: 12,
     worldInfoMode: 'active',
@@ -109,7 +110,7 @@ export const DEFAULT_SETTINGS: CowriteSettings = {
     manualLoreTokenBudget: 4000,
     recordTokenBudget: 12000,
   },
-  connections: [{ id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true }],
+  connections: [{ id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true, streaming: false }],
   ui: { x: null, y: null, edgeTuck: true },
 };
 

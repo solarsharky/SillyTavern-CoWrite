@@ -62,7 +62,10 @@ interface SillyTavernContext {
   saveSettingsDebounced(): void;
   getRequestHeaders(): Record<string, string>;
   getTokenCountAsync?(text: string): Promise<number>;
-  eventSource?: { on(event: string, listener: (...args: any[]) => void): void };
+  eventSource?: {
+    on(event: string, listener: (...args: any[]) => void): void;
+    removeListener?(event: string, listener: (...args: any[]) => void): void;
+  };
   event_types?: Record<string, string>;
 }
 
