@@ -1,10 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { ActivityEngine, applyPatch } from '../src/core/engine';
+import { describe, expect, it } from 'vitest';
+import { applyPatch } from '../src/core/engine';
 import { GeneratedBlockSchema, RecordSchema, SettingsSchema, TemplateSchema } from '../src/domain/schema';
-import type { RecordRepository } from '../src/adapters/repository';
-import type { GenerationGateway } from '../src/adapters/generation';
-import type { TavernBridge } from '../src/adapters/tavern';
-import { makeRecord, makeSettings, makeTemplate } from './fixtures';
+import { makeQuestionPatch, makeRecord, makeSettings, makeTemplate } from './fixtures';
 import { BUILTIN_TEMPLATES } from '../src/domain/defaults';
 import { prepareTemplateForGeneration } from '../src/core/template';
 
@@ -74,17 +71,32 @@ describe('追加事务与所有权', () => {
     ] }, 'opening')).toThrow('重复');
   });
 
-  it('撤销与重做只处理完整生成轮次', async () => {
+  it('兼容旧版已撤销、没有重roll快照的记录', () => {
     const generated = applyPatch(makeRecord(), { complete: false, blocks: [{ key: 'a', kind: 'text', author: 'char', title: '', content: '内容', targetIds: [] }] }, 'opening');
-    const saved: unknown[] = [];
-    const repository = { saveRecord: vi.fn(async (value) => { saved.push(value); return { synced: true }; }) } as unknown as RecordRepository;
-    const engine = new ActivityEngine({ repository, gateway: {} as GenerationGateway, tavern: {} as TavernBridge, resolveConnection: vi.fn() });
-    const undone = await engine.undo(generated);
-    expect(undone.record.blocks).toHaveLength(0);
-    expect(undone.record.cycles[0]?.status).toBe('undone');
-    const redone = await engine.redo(undone.record);
-    expect(redone.record.blocks[0]?.content).toBe('内容');
-    expect(RecordSchema.safeParse(redone.record).success).toBe(true);
-    expect(saved).toHaveLength(2);
+    generated.blocks = [];
+    generated.cycles[0]!.status = 'undone';
+    delete generated.cycles[0]!.previousState;
+    expect(RecordSchema.parse(generated).cycles[0]?.status).toBe('undone');
+  });
+
+  it.each([
+    ['short', '一起散步'], ['long', '我想陪你一起读书。'], ['single', '散步'], ['multi', ['散步', '读书']], ['scale', 4],
+  ] as const)('Char 的 %s 答案复用 User 原题配置并保持 User 空白', (type, value) => {
+    const answer = typeof value === 'object' ? [...value] : value;
+    const record = applyPatch(makeRecord(), makeQuestionPatch(type, answer), 'opening');
+    const [question, charAnswer] = record.blocks;
+    expect(question?.input?.value).toBeNull();
+    expect(charAnswer?.kind).toBe('answer');
+    expect(charAnswer?.input).toEqual({ ...question?.input, value: answer });
+    expect(charAnswer?.targetIds).toEqual([question?.id]);
+    expect(RecordSchema.parse(record).blocks[1]?.input?.value).toEqual(answer);
+  });
+
+  it('拒绝不属于原题的选项、错误题型及伪造 User 答案', () => {
+    expect(() => applyPatch(makeRecord(), makeQuestionPatch('single', '不存在的选项'), 'opening')).toThrow('对应题目');
+    expect(() => applyPatch(makeRecord(), makeQuestionPatch('scale', '四分'), 'opening')).toThrow('量表');
+    expect(() => applyPatch(makeRecord(), makeQuestionPatch('scale', 4.5), 'opening')).toThrow('对应题目');
+    expect(() => applyPatch(makeRecord(), makeQuestionPatch('short', ' '), 'opening')).toThrow('对应题目');
+    expect(GeneratedBlockSchema.safeParse({ key: 'a', kind: 'answer', author: 'user', answer: '替用户写', targetIds: ['q'] }).success).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { GenerationPatchSchema, type ConnectionProfile, type CowriteRecord, type
 import { buildStagePrompt, type GenerationStage } from '../core/prompt';
 import { DEFAULT_PROTOCOL, PATCH_JSON_SCHEMA, SUMMARY_JSON_SCHEMA } from '../core/protocol';
 import type { TavernBridge } from './tavern';
+import { BUILTIN_TEMPLATES } from '../domain/defaults';
 
 const GENERATION_TIMEOUT_MS = 180_000;
 
@@ -46,7 +47,7 @@ export class TavernGenerationGateway implements GenerationGateway {
 
     const text = extractContent(raw);
     try {
-      return parseGenerationPatch(text);
+      return parsePatchForRequest(text, options);
     } catch (error) {
       return await this.repairPatch(text, error, options);
     }
@@ -106,7 +107,7 @@ export class TavernGenerationGateway implements GenerationGateway {
       json_schema: PATCH_JSON_SCHEMA,
     }));
     try {
-      return parseGenerationPatch(extractContent(repaired));
+      return parsePatchForRequest(extractContent(repaired), options);
     } catch (repairError) {
       throw new GenerationOutputError('模型两次返回的卡片结构都无效，记录未被修改。', raw, repairError);
     }
@@ -182,6 +183,18 @@ export function parseJson(text: string): unknown {
 
 export function parseGenerationPatch(text: string): GenerationPatch {
   return GenerationPatchSchema.parse(normalizeGenerationPatch(parseJson(text)));
+}
+
+function parsePatchForRequest(text: string, options: GenerateOptions): GenerationPatch {
+  const patch = parseGenerationPatch(text);
+  const shared = BUILTIN_TEMPLATES.find((template) => template.id === 'builtin-shared-questionnaire')!;
+  if (options.stage !== 'continuation' && options.template.id === shared.id && options.template.prompts.opening === shared.prompts.opening) {
+    const questions = patch.blocks.filter((block) => block.kind === 'input');
+    if (!questions.length || questions.some((question) => !patch.blocks.some((block) => block.kind === 'answer' && block.targetIds[0] === question.key))) {
+      throw new Error('双人问卷首轮必须出题，并为每道 User input 同时返回一张 Char answer 卡片；answer.targetIds 引用该题 key，answer 字段填写 Char 自己的答案。');
+    }
+  }
+  return patch;
 }
 
 function normalizeGenerationPatch(input: unknown): unknown {

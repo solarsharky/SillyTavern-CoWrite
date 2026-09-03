@@ -45,7 +45,7 @@ export const InputConfigSchema = InputConfigBaseSchema.superRefine((input, ctx) 
 });
 export type InputConfig = z.infer<typeof InputConfigSchema>;
 
-export const BlockKindSchema = z.enum(['section', 'text', 'input', 'review', 'divider']);
+export const BlockKindSchema = z.enum(['section', 'text', 'input', 'answer', 'review', 'divider']);
 export const BlockAuthorSchema = z.enum(['system', 'char', 'user']);
 
 export const BlockSchema = z.object({
@@ -65,6 +65,9 @@ export const BlockSchema = z.object({
   if (block.kind === 'input' && block.author !== 'user') {
     ctx.addIssue({ code: 'custom', message: '输入卡片必须属于 User' });
   }
+  if (block.kind === 'answer' && (block.author !== 'char' || !block.input || block.input.value === null || block.targetIds.length !== 1)) {
+    ctx.addIssue({ code: 'custom', message: '角色答案必须属于 Char，包含已填写的题型配置，并关联一道题' });
+  }
   if (block.kind !== 'input' && block.author === 'user') {
     ctx.addIssue({ code: 'custom', message: 'AI 不得创建已填写的 User 内容' });
   }
@@ -78,8 +81,15 @@ export const GeneratedBlockSchema = z.object({
   title: z.string().default(''),
   content: z.string().default(''),
   input: InputConfigBaseSchema.omit({ value: true }).optional(),
+  answer: InputValueSchema.optional(),
   targetIds: z.array(z.string()).default([]),
 }).superRefine((block, ctx) => {
+  if (block.kind === 'answer' && (block.author !== 'char' || block.answer == null || block.targetIds.length !== 1)) {
+    ctx.addIssue({ code: 'custom', message: '角色答案必须使用 author=char、answer 答案值，并在 targetIds 中关联一道题' });
+  }
+  if (block.kind !== 'answer' && block.answer !== undefined) {
+    ctx.addIssue({ code: 'custom', message: '只有 Char 的 answer 卡片可以携带答案值' });
+  }
   if (block.kind === 'input') {
     if (!block.input) ctx.addIssue({ code: 'custom', message: 'input 卡片缺少配置' });
     if (block.author !== 'user') ctx.addIssue({ code: 'custom', message: 'input 卡片必须交给 user' });
@@ -158,9 +168,14 @@ export type CowriteTemplate = z.infer<typeof TemplateSchema>;
 
 export const CycleSchema = z.object({
   id: z.string().min(1),
-  stage: z.enum(['opening', 'continuation']),
+  stage: z.enum(['opening', 'continuation', 'more']),
   status: z.enum(['applied', 'undone']).default('applied'),
   blockSnapshot: z.array(BlockSchema),
+  previousState: z.object({
+    title: z.string(),
+    rollingSummary: z.string(),
+    summaryThroughCycle: z.string(),
+  }).optional(),
   createdAt: z.string(),
 });
 export type Cycle = z.infer<typeof CycleSchema>;

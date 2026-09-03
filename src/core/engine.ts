@@ -11,7 +11,9 @@ import {
   type CowriteRecord,
   type CowriteTemplate,
   type GenerationPatch,
+  type InputConfig,
   InputValueSchema,
+  InputConfigSchema,
 } from '../domain/schema';
 import { serializeRecordForModel, type GenerationStage } from './prompt';
 import { cloneJson } from './clone';
@@ -74,44 +76,61 @@ export class ActivityEngine {
   }
 
   async updateInput(record: CowriteRecord, blockId: string, value: z.infer<typeof InputValueSchema>): Promise<EngineResult> {
+    this.assertCharacter(record);
     const next = cloneJson(record);
     const block = next.blocks.find((item) => item.id === blockId);
     if (!block || block.kind !== 'input' || !block.input) throw new Error('找不到可编辑的 User 输入卡片。');
     block.input.value = value;
-    next.updatedAt = new Date().toISOString();
-    return { record: RecordSchema.parse(next), save: await this.deps.repository.saveRecord(next), warnings: [] };
-  }
-
-  async undo(record: CowriteRecord): Promise<EngineResult> {
-    const next = cloneJson(record);
-    const cycle = [...next.cycles].reverse().find((item) => item.status === 'applied');
-    if (!cycle) throw new Error('没有可撤销的生成轮次。');
-    const blockIds = new Set(cycle.blockSnapshot.map((block) => block.id));
-    cycle.blockSnapshot = next.blocks.filter((block) => blockIds.has(block.id));
-    next.blocks = next.blocks.filter((block) => !blockIds.has(block.id));
-    cycle.status = 'undone';
     next.status = 'active';
     next.updatedAt = new Date().toISOString();
     return { record: RecordSchema.parse(next), save: await this.deps.repository.saveRecord(next), warnings: [] };
   }
 
-  async redo(record: CowriteRecord): Promise<EngineResult> {
+  async reroll(record: CowriteRecord): Promise<EngineResult> {
+    this.assertCharacter(record);
     const next = cloneJson(record);
-    const cycle = next.cycles.find((item) => item.status === 'undone');
-    if (!cycle) throw new Error('没有可重做的生成轮次。');
-    const cycleIndex = next.cycles.findIndex((item) => item.id === cycle.id);
-    if (next.cycles.slice(cycleIndex + 1).some((item) => item.status === 'applied')) {
-      throw new Error('撤销后已经产生了新内容，不能再重做旧分支。');
+    const cycle = [...next.cycles].reverse().find((item) => item.status === 'applied');
+    if (!cycle) throw new Error('还没有可以重roll的内容，请先交给他写。');
+    next.blocks = next.blocks.filter((block) => block.cycleId !== cycle.id);
+    next.cycles = next.cycles.filter((item) => item.status === 'applied' && item.id !== cycle.id);
+    next.title = cycle.previousState?.title || next.title;
+    next.rollingSummary = cycle.previousState?.rollingSummary || '';
+    next.summaryThroughCycle = cycle.previousState?.summaryThroughCycle || '';
+    next.status = 'active';
+    if (cycle.stage === 'continuation') this.assertCanContinue(next);
+    // Only persist after a replacement succeeds, so stopping or failure keeps the original round intact.
+    return await this.runGeneration(next, cycle.stage);
+  }
+
+  async clearAnswers(record: CowriteRecord): Promise<EngineResult> {
+    this.assertCharacter(record);
+    const next = cloneJson(record);
+    const applied = next.cycles.filter((cycle) => cycle.status === 'applied');
+    const firstCycleId = applied[0]?.id;
+    // Keep the original questions and every explicitly added set, not follow-up feedback forms.
+    next.cycles = applied.filter((cycle) => cycle.id === firstCycleId || cycle.stage === 'opening' || cycle.stage === 'more');
+    const keptCycles = new Set(next.cycles.map((cycle) => cycle.id));
+    next.blocks = next.blocks.filter((block) => keptCycles.has(block.cycleId));
+    const keptBlocks = new Set(next.blocks.map((block) => block.id));
+    for (const block of next.blocks) {
+      if (block.kind === 'input' && block.input) block.input.value = null;
+      block.targetIds = block.targetIds.filter((id) => keptBlocks.has(id));
     }
-    next.blocks.push(...cycle.blockSnapshot);
-    cycle.status = 'applied';
+    for (const cycle of next.cycles) {
+      cycle.blockSnapshot = cloneJson(next.blocks.filter((block) => block.cycleId === cycle.id));
+      // The previous summaries may contain the answers being cleared.
+      delete cycle.previousState;
+    }
+    next.rollingSummary = '';
+    next.summaryThroughCycle = '';
+    next.status = 'active';
     next.updatedAt = new Date().toISOString();
     return { record: RecordSchema.parse(next), save: await this.deps.repository.saveRecord(next), warnings: [] };
   }
 
-  async setStatus(record: CowriteRecord, status: CowriteRecord['status']): Promise<EngineResult> {
-    const next = { ...cloneJson(record), status, updatedAt: new Date().toISOString() };
-    return { record: RecordSchema.parse(next), save: await this.deps.repository.saveRecord(next), warnings: [] };
+  async generateMore(record: CowriteRecord): Promise<EngineResult> {
+    this.assertCharacter(record);
+    return await this.runGeneration(record, 'more');
   }
 
   async toggleStar(record: CowriteRecord): Promise<EngineResult> {
@@ -119,29 +138,12 @@ export class ActivityEngine {
     return { record: RecordSchema.parse(next), save: await this.deps.repository.saveRecord(next), warnings: [] };
   }
 
-  async createNextVolume(record: CowriteRecord): Promise<EngineResult> {
-    const date = new Date().toISOString();
-    const next: CowriteRecord = {
-      ...cloneJson(record),
-      id: crypto.randomUUID(),
-      title: `${record.title} · 下一卷`,
-      status: 'active',
-      blocks: [],
-      cycles: [],
-      rollingSummary: record.rollingSummary || serializeRecordForModel(record),
-      summaryThroughCycle: '',
-      parentRecordId: record.id,
-      createdAt: date,
-      updatedAt: date,
-    };
-    return await this.runGeneration(next, 'continuation');
-  }
-
   private async runGeneration(source: CowriteRecord, stage: GenerationStage): Promise<EngineResult> {
     this.operationActive = true;
     this.stopRequested = false;
     try {
       const record = cloneJson(source);
+      record.status = 'active';
       const template = record.templateSnapshot;
       const manualLore = await this.deps.tavern.loadManualLore(template);
       this.assertNotStopped();
@@ -187,7 +189,7 @@ export class ActivityEngine {
     const startIndex = record.summaryThroughCycle ? applied.findIndex((cycle) => cycle.id === record.summaryThroughCycle) + 1 : 0;
     const eligible = applied.slice(startIndex).filter((cycle) => !recentIds.has(cycle.id));
     if (!eligible.length) {
-      throw new Error('记录已超过上下文预算，但还没有可压缩的早期轮次。请提高预算或创建下一卷。');
+      throw new Error('这份记录已超过上下文预算，暂时无法压缩。请在设置中提高长记录预算，或从模板库新建一份记录。');
     }
     const eligibleIds = new Set(eligible.map((cycle) => cycle.id));
     const source = JSON.stringify({
@@ -202,10 +204,12 @@ export class ActivityEngine {
   }
 
   private assertCanContinue(record: CowriteRecord): void {
-    if (record.status === 'archived') throw new Error('归档记录需要先重新打开。');
-    if (record.status === 'completed') throw new Error('已完成的记录需要先重新打开。');
+    this.assertCharacter(record);
     const missing = record.blocks.filter((block) => block.kind === 'input' && block.input?.required && !isInputAnswered(block));
     if (missing.length) throw new Error(`还有 ${missing.length} 个必填项未完成。`);
+  }
+
+  private assertCharacter(record: CowriteRecord): void {
     const character = this.deps.tavern.currentCharacter();
     if (!character || character.id !== record.characterId) throw new Error(`请切换回角色“${record.characterName}”后继续。`);
   }
@@ -225,22 +229,43 @@ export function applyPatch(record: CowriteRecord, patch: GenerationPatch, stage:
         throw new Error(`模型评价引用了不存在的卡片：${target}`);
       }
     }
+    let input: InputConfig | undefined = generated.input ? { ...generated.input, value: null } : undefined;
+    let title = generated.title;
+    if (generated.kind === 'answer') {
+      const question = next.blocks.find((block) => block.id === targetIds[0])
+        || patch.blocks.find((block) => keyMap.get(block.key) === targetIds[0]);
+      if (question?.kind !== 'input' || !question.input) throw new Error('角色答案必须关联一张 User 题目卡片。');
+      const answerInput = InputConfigSchema.parse({ ...question.input, value: generated.answer });
+      if (answerInput.value === null
+        || (typeof answerInput.value === 'string' && !answerInput.value.trim())
+        || (Array.isArray(answerInput.value) && !answerInput.value.length)
+        || (answerInput.type === 'single' && !answerInput.options.includes(String(answerInput.value)))
+        || (answerInput.type === 'scale' && typeof answerInput.value === 'number' && !Number.isInteger(answerInput.value - answerInput.min))
+        || (answerInput.type === 'multi' && Array.isArray(answerInput.value) && answerInput.value.some((value) => !answerInput.options.includes(value)))) {
+        throw new Error('角色答案必须使用对应题目的选项和题型。');
+      }
+      input = answerInput;
+      title = question.title;
+    }
     return BlockSchema.parse({
       id: keyMap.get(generated.key),
       cycleId,
       kind: generated.kind,
       author: generated.author,
-      title: generated.title,
+      title,
       content: generated.content,
-      input: generated.input ? { ...generated.input, value: null } : undefined,
+      input,
       targetIds,
       createdAt: date,
     });
   });
   next.blocks.push(...blocks);
-  next.cycles.push({ id: cycleId, stage, status: 'applied', blockSnapshot: cloneJson(blocks), createdAt: date });
-  if (patch.title?.trim()) next.title = patch.title.trim();
-  if (patch.complete) next.status = 'completed';
+  next.cycles.push({
+    id: cycleId, stage, status: 'applied', blockSnapshot: cloneJson(blocks), createdAt: date,
+    previousState: { title: record.title, rollingSummary: record.rollingSummary, summaryThroughCycle: record.summaryThroughCycle },
+  });
+  if (stage !== 'more' && patch.title?.trim()) next.title = patch.title.trim();
+  next.status = patch.complete && stage !== 'more' ? 'completed' : 'active';
   if (patch.summaryUpdate?.trim()) next.rollingSummary = patch.summaryUpdate.trim();
   next.updatedAt = date;
   return RecordSchema.parse(next);

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GenerationOutputError, GenerationStoppedError, parseGenerationPatch, TavernGenerationGateway, withTimeout } from '../src/adapters/generation';
 import type { TavernBridge } from '../src/adapters/tavern';
 import type { ConnectionProfile } from '../src/domain/schema';
-import { makeRecord, makeTemplate } from './fixtures';
+import { makeQuestionPatch, makeRecord, makeTemplate } from './fixtures';
 
 const valid = JSON.stringify({ complete: false, blocks: [{ key: 'a', kind: 'text', author: 'char', title: '', content: '好', targetIds: [] }] });
 
@@ -15,7 +15,7 @@ function setup(responses: Array<string | Promise<string>>) {
 }
 
 function options(connection: ConnectionProfile = { id: 'st-main', type: 'st', name: '跟随 SillyTavern', readonly: true }) {
-  return { template: makeTemplate(), record: makeRecord(), stage: 'opening' as const, connection, apiKey: connection.type === 'custom' ? 'secret' : undefined, manualLore: '' };
+  return { template: makeTemplate({ id: 'test-format' }), record: makeRecord(), stage: 'opening' as const, connection, apiKey: connection.type === 'custom' ? 'secret' : undefined, manualLore: '' };
 }
 
 describe('生成网关', () => {
@@ -32,7 +32,7 @@ describe('生成网关', () => {
 
   it('关闭历史聊天和世界书时不会加入对应提示词位置', async () => {
     const { gateway, generateRaw } = setup([valid]);
-    const template = makeTemplate({ context: { ...makeTemplate().context, recentChatCount: 0, worldInfoMode: 'off' } });
+    const template = makeTemplate({ id: 'test-format', context: { ...makeTemplate().context, recentChatCount: 0, worldInfoMode: 'off' } });
     await gateway.generatePatch({ ...options(), template });
     const config = generateRaw.mock.calls[0]?.[0];
     expect(config.max_chat_history).toBe(0);
@@ -43,7 +43,7 @@ describe('生成网关', () => {
 
   it('手选世界书内容作为独立系统数据注入且不启用当前世界书位置', async () => {
     const { gateway, generateRaw } = setup([valid]);
-    const template = makeTemplate({ context: { ...makeTemplate().context, worldInfoMode: 'manual' } });
+    const template = makeTemplate({ id: 'test-format', context: { ...makeTemplate().context, worldInfoMode: 'manual' } });
     await gateway.generatePatch({ ...options(), template, manualLore: '<lore_data>条目内容</lore_data>' });
     const prompts = generateRaw.mock.calls[0]?.[0].ordered_prompts;
     expect(prompts).toContainEqual(expect.objectContaining({ role: 'system', content: expect.stringContaining('条目内容') }));
@@ -107,6 +107,23 @@ describe('生成网关', () => {
   it('没有任何可见题干的输入卡会被拒绝并进入修复流程', () => {
     const raw = JSON.stringify({ blocks: [{ key: 'q', kind: 'input', author: 'user', title: '', content: '', targetIds: [], input: { type: 'short', label: '请填写' } }], complete: false });
     expect(() => parseGenerationPatch(raw)).toThrow('完整、可见的题干');
+  });
+
+  it('双人首轮漏掉 Char 答案时自动修复为同题配对答案', async () => {
+    const pair = makeQuestionPatch('multi', ['散步', '读书']);
+    const { gateway, generateRaw } = setup([
+      JSON.stringify({ complete: false, blocks: [pair.blocks[0]] }),
+      JSON.stringify(pair),
+    ]);
+    const patch = await gateway.generatePatch({ ...options(), template: makeTemplate() });
+    expect(generateRaw).toHaveBeenCalledTimes(2);
+    expect(patch.blocks[1]?.answer).toEqual(['散步', '读书']);
+    expect(patch.blocks[0]?.input).not.toHaveProperty('value');
+  });
+
+  it('双人首轮修复后仍无 Char 答案则不接受半份问卷', async () => {
+    const { gateway } = setup([valid, valid]);
+    await expect(gateway.generatePatch({ ...options(), template: makeTemplate() })).rejects.toBeInstanceOf(GenerationOutputError);
   });
 
   it('超时会停止请求并返回不写入提示', async () => {

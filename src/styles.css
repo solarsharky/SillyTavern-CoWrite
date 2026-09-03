@@ -138,6 +138,19 @@
 .cw-record-heading p, .cw-page-header p { margin: 0; color: var(--cw-muted); }
 
 .cw-page-stack { display: grid; gap: 14px; }
+.cw-question-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.cw-answer-column { min-width: 0; }
+.cw-question-tabs { display: none; }
+.cw-answer-column > * + * { margin-top: 10px; }
+.cw-question-pair .cw-block { width: 100%; }
+.cw-inline-reviews { display: grid; gap: 10px; width: min(88%, 760px); margin-right: auto; }
+.cw-inline-reviews--user { margin-left: auto; margin-right: 0; }
+.cw-inline-reviews .cw-block { width: 100%; border-left-width: 3px; box-shadow: none; }
+.cw-question-pair .cw-inline-reviews { width: 100%; }
+.cw-inline-reviews .cw-block--review::before { display: none; }
+.cw-block--answer .cw-field:disabled, .cw-block--answer fieldset:disabled { opacity: 1; color: var(--cw-ink); -webkit-text-fill-color: var(--cw-ink); }
+.cw-block--answer .cw-choice, .cw-block--answer .cw-scale label { cursor: default; }
+.cw-block--answer input:disabled { opacity: 1; }
 .cw-block {
   position: relative;
   padding: 18px 20px;
@@ -317,8 +330,15 @@
   .cw-content-item { align-items: flex-start; flex-direction: column; }
   .cw-record-row { grid-template-columns: 1fr; }
   .cw-record-row > .cw-status { margin-left: 54px; }
-  .cw-actionbar { overflow-x: auto; flex-wrap: nowrap; }
-  .cw-actionbar .cw-button { flex: 0 0 auto; }
+  .cw-question-pair { grid-template-columns: 1fr; }
+  .cw-question-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border: 1px solid var(--cw-line); border-radius: 11px; background: var(--cw-paper); }
+  .cw-question-tabs button { min-height: 40px; padding: 7px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--cw-muted); cursor: pointer; }
+  .cw-question-tabs button[aria-selected="true"] { background: #84453f; color: #fff8ed; font-weight: 700; box-shadow: 0 2px 6px rgba(91,43,39,.15); }
+  .cw-question-tabs button:focus-visible { outline: 2px solid #b66d64; outline-offset: 2px; }
+  .cw-question-pair > .cw-answer-column:not(.is-active) { display: none; }
+  .cw-inline-reviews { width: 96%; }
+  .cw-question-pair .cw-block, .cw-question-pair .cw-inline-reviews { width: 100%; }
+  .cw-actionbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cw-busy { inset: auto 10px 10px; justify-content: center; }
   .cw-editor-layer { padding: 0; }
   .cw-editor { width: 100%; height: 100%; border-radius: 0; }

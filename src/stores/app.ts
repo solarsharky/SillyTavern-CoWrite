@@ -9,7 +9,7 @@ import { buildPromptPreview } from '../core/prompt';
 import { DEFAULT_PROTOCOL } from '../core/protocol';
 import { cloneJson } from '../core/clone';
 import { prepareTemplateForGeneration } from '../core/template';
-import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS, cloneBuiltinTemplate } from '../domain/defaults';
+import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS, cloneBuiltinTemplate, upgradeBuiltinPrompts } from '../domain/defaults';
 import {
   BackupSchema,
   ConnectionProfileSchema,
@@ -48,6 +48,8 @@ export const useCowriteStore = defineStore('cowrite', () => {
   const helperVersion = ref('未检测');
   const settings = reactive<CowriteSettings>(cloneJson(DEFAULT_SETTINGS));
   const sessionKeys = reactive<Record<string, string>>({});
+  let operationQueue: Promise<void> = Promise.resolve();
+  let stopRequested = false;
 
   const engine = new ActivityEngine({
     repository,
@@ -120,55 +122,52 @@ export const useCowriteStore = defineStore('cowrite', () => {
     });
   }
 
-  async function continueRecord(templateOverride?: CowriteTemplate): Promise<void> {
-    if (!selectedRecord.value) return;
-    await run(async () => {
-      const record = RecordSchema.parse({
-        ...cloneJson(selectedRecord.value!),
-        templateSnapshot: prepareTemplateForGeneration(templateOverride || selectedRecord.value!.templateSnapshot, settings.generationContext),
-      });
-      applyEngineResult(await engine.continue(record));
-    });
+  async function continueRecord(): Promise<void> {
+    await changeSelectedRecord((record) => engine.continue(record), true);
   }
 
   async function stopGeneration(): Promise<void> {
-    if (await engine.stop()) notices.value = ['已发送停止请求；本轮不会写入半成品。'];
+    stopRequested = true;
+    if (await engine.stop() || busy.value) notices.value = ['已发送停止请求；本轮不会写入半成品。'];
   }
 
   async function commitInput(blockId: string, value: InputConfig['value']): Promise<void> {
-    if (!selectedRecord.value) return;
-    await run(async () => applyEngineResult(await engine.updateInput(selectedRecord.value!, blockId, value)), false);
+    await changeSelectedRecord((record) => engine.updateInput(record, blockId, value), false, false);
   }
 
-  async function undo(): Promise<void> {
-    if (!selectedRecord.value) return;
-    await run(async () => applyEngineResult(await engine.undo(selectedRecord.value!)));
+  async function reroll(): Promise<void> {
+    await changeSelectedRecord((record) => engine.reroll(record), true);
   }
 
-  async function redo(): Promise<void> {
-    if (!selectedRecord.value) return;
-    await run(async () => applyEngineResult(await engine.redo(selectedRecord.value!)));
+  async function clearAnswers(): Promise<void> {
+    await changeSelectedRecord((record) => engine.clearAnswers(record));
   }
 
-  async function setRecordStatus(status: CowriteRecord['status']): Promise<void> {
-    if (!selectedRecord.value) return;
-    await run(async () => applyEngineResult(await engine.setStatus(selectedRecord.value!, status)), false);
+  async function generateMore(): Promise<void> {
+    await changeSelectedRecord((record) => engine.generateMore(record), true);
   }
 
   async function toggleRecordStar(record = selectedRecord.value): Promise<void> {
     if (!record) return;
-    await run(async () => applyEngineResult(await engine.toggleStar(record)), false);
+    const recordId = record.id;
+    await run(async () => {
+      const current = records.value.find((item) => item.id === recordId);
+      if (current) applyEngineResult(await engine.toggleStar(current), selectedRecordId.value === recordId);
+    }, false);
   }
 
-  async function nextVolume(): Promise<void> {
-    if (!selectedRecord.value) return;
+  async function changeSelectedRecord(operation: (record: CowriteRecord) => Promise<EngineResult>, prepareGeneration = false, showBusy = true): Promise<void> {
+    const recordId = selectedRecordId.value;
+    if (!recordId) return;
     await run(async () => {
+      const source = records.value.find((item) => item.id === recordId);
+      if (!source) return;
       const record = RecordSchema.parse({
-        ...cloneJson(selectedRecord.value!),
-        templateSnapshot: prepareTemplateForGeneration(selectedRecord.value!.templateSnapshot, settings.generationContext),
+        ...cloneJson(source),
+        templateSnapshot: prepareGeneration ? prepareTemplateForGeneration(source.templateSnapshot, settings.generationContext) : source.templateSnapshot,
       });
-      applyEngineResult(await engine.createNextVolume(record));
-    });
+      applyEngineResult(await operation(record), selectedRecordId.value === recordId);
+    }, showBusy);
   }
 
   async function removeRecord(record: CowriteRecord): Promise<void> {
@@ -380,23 +379,35 @@ export const useCowriteStore = defineStore('cowrite', () => {
   }
 
   async function run(operation: () => Promise<void>, showBusy = true): Promise<void> {
-    clearMessages();
-    if (showBusy) busy.value = true;
-    try {
-      await operation();
-    } catch (caught) {
-      error.value = errorMessage(caught);
-      if (caught instanceof GenerationOutputError) rawOutput.value = caught.rawOutput;
-    } finally {
-      if (showBusy) busy.value = false;
+    if (busy.value) return;
+    if (showBusy) {
+      busy.value = true;
+      stopRequested = false;
     }
+    // Finish pending input saves before generating, including a change fired by clicking the button.
+    operationQueue = operationQueue.then(async () => {
+      clearMessages();
+      try {
+        if (showBusy && stopRequested) {
+          notices.value = ['已停止生成，记录没有被修改。'];
+          return;
+        }
+        await operation();
+      } catch (caught) {
+        error.value = errorMessage(caught);
+        if (caught instanceof GenerationOutputError) rawOutput.value = caught.rawOutput;
+      } finally {
+        if (showBusy) busy.value = false;
+      }
+    });
+    await operationQueue;
   }
 
-  function applyEngineResult(result: EngineResult): void {
+  function applyEngineResult(result: EngineResult, select = true): void {
     const index = records.value.findIndex((item) => item.id === result.record.id);
     if (index >= 0) records.value[index] = result.record;
     else records.value.unshift(result.record);
-    selectedRecordId.value = result.record.id;
+    if (select) selectedRecordId.value = result.record.id;
     if (result.save.synced) unsyncedRecordIds.value = unsyncedRecordIds.value.filter((id) => id !== result.record.id);
     else if (!unsyncedRecordIds.value.includes(result.record.id)) unsyncedRecordIds.value.push(result.record.id);
     notices.value = result.warnings;
@@ -431,7 +442,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
       ...valid.filter((item) => !builtinIds.has(item.id)),
     ];
     return merged.filter((item) => !settings.hiddenTemplateIds.includes(item.id)).map((item) => ({
-      ...item,
+      ...upgradeBuiltinPrompts(item),
       starred: settings.starredTemplateIds.includes(item.id) || item.starred,
     }));
   }
@@ -440,7 +451,7 @@ export const useCowriteStore = defineStore('cowrite', () => {
     initialized, busy, open, tab, error, notices, rawOutput, records, unsyncedRecordIds, templates, selectedRecordId,
     characterId, characterName, helperVersion, settings, sessionKeys, selectedRecord, visibleRecords,
     canGenerate, persistedTemplates, initialize, refreshCharacter, start, continueRecord, stopGeneration,
-    commitInput, undo, redo, setRecordStatus, toggleRecordStar, nextVolume, removeRecord, retrySync, rebindRecord, saveTemplate,
+    commitInput, reroll, clearAnswers, toggleRecordStar, generateMore, removeRecord, retrySync, rebindRecord, saveTemplate,
     duplicateTemplate, removeTemplate, restoreBuiltinTemplates, saveContentItem, removeContentItem, toggleTemplateStar, importTemplateJson, exportTemplate, saveConnections, testConnection,
     addConnection, exportRecord, importRecordJson, exportBackup, restoreBackup, exportRawOutput, preview, resetProtocol,
     saveUiPosition, saveSettings, clearMessages,

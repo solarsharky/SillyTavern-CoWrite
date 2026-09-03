@@ -1,7 +1,7 @@
 import type { Block, CowriteRecord, CowriteTemplate } from '../domain/schema';
 import { isInputAnswered } from '../domain/schema';
 
-export type GenerationStage = 'opening' | 'continuation';
+export type GenerationStage = 'opening' | 'continuation' | 'more';
 
 export function expandPrompt(text: string, record: CowriteRecord): string {
   return text
@@ -45,9 +45,14 @@ export function serializeRecordForModel(record: CowriteRecord): string {
 }
 
 export function buildStagePrompt(template: CowriteTemplate, record: CowriteRecord, stage: GenerationStage): string {
-  const stagePrompt = stage === 'opening' ? template.prompts.opening : template.prompts.continuation;
+  const stagePrompt = stage === 'more'
+    ? `用户要求追加新内容。保留已有题目、答案和回应，在当前记录末尾按下面的首轮规则追加一组新题；如果是交换日记，则写一篇新的日记并留出 User 书写位置。不要重复已有题目，不要评价旧答案或只写结束总结，不要因为旧内容已完成或尚有空白而停止出题。新题编号接续已有题目，complete 必须为 false。\n\n首轮规则：\n${template.prompts.opening}`
+    : stage === 'opening' ? template.prompts.opening : template.prompts.continuation;
+  const continuationHint = stage === 'continuation'
+    ? '\n用户已点击“交给他写”，请回应当前填写的内容，优先处理最近追加的题目和反馈；旧记录的完成或归档标记不表示本次请求应该停止。'
+    : '';
   const contentGuidance = template.contentGuidance.trim() || '没有额外内容要求；按玩法和角色设定自然发挥。';
-  return `${expandPrompt(template.prompts.rules, record)}\n\n本轮流程：\n${expandPrompt(stagePrompt, record)}\n\n本轮内容要求（只决定主题和内容，不得改变输出格式）：\n${expandPrompt(contentGuidance, record)}\n\n<record_data>\n${serializeRecordForModel(record)}\n</record_data>`;
+  return `${expandPrompt(template.prompts.rules, record)}\n\n本轮流程：\n${expandPrompt(stagePrompt, record)}${continuationHint}\n\n本轮内容要求（只决定主题和内容，不得改变输出格式）：\n${expandPrompt(contentGuidance, record)}\n\n<record_data>\n${serializeRecordForModel(record)}\n</record_data>`;
 }
 
 export function buildPromptPreview(template: CowriteTemplate, record?: CowriteRecord): string {

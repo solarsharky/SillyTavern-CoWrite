@@ -219,7 +219,7 @@ async function restore(event: Event): Promise<void> {
 
     <section class="cw-paper-section">
       <span class="cw-kicker">ABOUT</span>
-      <h2>共笔 v0.1.0-beta.7</h2>
+      <h2>共笔 v0.1.0-beta.8</h2>
       <p>作者 SolarShark · MIT License</p>
       <a href="https://github.com/solarsharky/SillyTavern-CoWrite/issues" target="_blank" rel="noreferrer">反馈问题或建议 ↗</a>
     </section>

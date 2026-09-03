@@ -40,8 +40,8 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
     },
     prompts: {
       rules: `这是 {{char}} 与 {{user}} 共同完成的双人问卷。保持 {{char}} 的性格、措辞和关系认知。每次只推进一个自然阶段，不要替 {{user}} 填写。每道给 User 的问题都必须是一张 input 卡片，完整题干写入 input.label；title 只写题号，content 留空。`,
-      opening: `创建恰好 5 道有趣且有关系感的问题，混合使用短答、长答、单选、多选或量表。除至多一张简短的 Char 开场 text 卡片外，只创建 5 张交给 User 的 input 卡片。每张 input.label 必须包含完整、具体、可见的题目，不能只写“请填写”“第1题”等泛称，也不能用独立 text 卡片承载题干。单选/多选给出清晰 options，量表给出 min、max 和两端含义。首轮绝不替 User 回答。`,
-      continuation: `检查当前记录：如果 User 已回答首轮问题，就让 {{char}} 逐题给出自己的答案，并追加让 User 评价 Char 答案的输入位；如果 User 已完成这些评价，就由 {{char}} 评价 User 的原答案与反馈并将记录标记为完成。否则生成最合适的下一步。`,
+      opening: `创建恰好 5 道有趣且有关系感的问题，混合使用短答、长答、单选、多选或量表。每道题同时创建一张交给 User 的 input 卡片和一张 {{char}} 已填写的 answer 卡片，共 5 对；可另加一张简短开场 text。input.label 写完整题干，title 只写题号，content 留空。single/multi 给出清晰 options，scale 给出 min、max 和两端含义。Char 答案使用 kind=answer、author=char，targetIds 引用对应 input 的 key，answer 按原题型填写字符串、选项数组或数字，不另设题型或选项。首轮就写好 Char 自己的答案，User 的输入必须保持空白。`,
+      continuation: `User 点击“交给他写”后，让 {{char}} 逐题评价 User 刚填写或修改的答案。每道已回答的 User input 各生成一张 kind=review、author=char 卡片，targetIds 只填这道 User input 的 id；content 只写对这一题的评价或批改，可与 Char 自己的答案比较。不要评价尚未填写的题目，不要另建 User 评价输入位，也不要将逐题评价合并成一段总结。旧记录若缺少 Char 自己的答案，可按原题型补上 kind=answer 卡片。所有已答题都评价后可标记 complete=true，这不会阻止用户修改后再次交给他写。`,
     },
   }),
   template({
@@ -66,7 +66,7 @@ export const BUILTIN_TEMPLATES: CowriteTemplate[] = [
     prompts: {
       rules: `由 {{char}} 主持一份面向 {{user}} 的问卷。问题应符合角色性格和当前关系，不替 User 作答。每道题都必须是一张 input 卡片，完整题干写入 input.label；title 只写题号，content 留空。`,
       opening: `以 {{char}} 的口吻创建恰好 5 道具体、有角色感的问题。除至多一张简短的 Char 开场 text 卡片外，只创建 5 张 User input 卡片。每张 input.label 必须是完整可见的题目，不能只写“请填写”“请作答”“第几题”，也不能把题干另放在 text 卡片中。题型可混用 short、long、single、multi、scale；single/multi 必须给出清晰 options，scale 必须给 min、max、minLabel、maxLabel。content 留空，绝不替 User 作答。`,
-      continuation: `如果 User 已回答，{{char}} 应逐题给出真诚、有角色感的评价，最后写一段总结并标记完成；若仍有未答必填题，只温和提醒，不重复出题。`,
+      continuation: `如果 User 已回答，{{char}} 应逐题给出真诚、有角色感的评价或批改。每道已回答的 User input 各创建一张 kind=review、author=char 卡片，targetIds 只填对应的 User input id，content 只写这一题的评价，显示在该答案下方；不要把逐题评价集中写进 text。最后可额外写一段简短总结并标记完成；若仍有未答必填题，只温和提醒，不重复出题。`,
     },
   }),
   template({
@@ -122,4 +122,22 @@ export function cloneBuiltinTemplate(source: CowriteTemplate, id: string, date =
     createdAt: date,
     updatedAt: date,
   };
+}
+
+// Upgrade only unchanged built-in prompts, including snapshots in existing records.
+export function upgradeBuiltinPrompts(source: CowriteTemplate): CowriteTemplate {
+  const next = cloneJson(source);
+  const builtin = BUILTIN_TEMPLATES.find((item) => item.id === source.id);
+  if (!builtin) return next;
+  const legacyOpening = '创建恰好 5 道有趣且有关系感的问题，混合使用短答、长答、单选、多选或量表。除至多一张简短的 Char 开场 text 卡片外，只创建 5 张交给 User 的 input 卡片。每张 input.label 必须包含完整、具体、可见的题目，不能只写“请填写”“第1题”等泛称，也不能用独立 text 卡片承载题干。单选/多选给出清晰 options，量表给出 min、max 和两端含义。首轮绝不替 User 回答。';
+  const legacyContinuation = '检查当前记录：如果 User 已回答首轮问题，就让 {{char}} 逐题给出自己的答案，并追加让 User 评价 Char 答案的输入位；如果 User 已完成这些评价，就由 {{char}} 评价 User 的原答案与反馈并将记录标记为完成。否则生成最合适的下一步。';
+  const legacyCharContinuation = '如果 User 已回答，{{char}} 应逐题给出真诚、有角色感的评价，最后写一段总结并标记完成；若仍有未答必填题，只温和提醒，不重复出题。';
+  if (source.id === 'builtin-shared-questionnaire') {
+    if (next.prompts.opening === legacyOpening) next.prompts.opening = builtin.prompts.opening;
+    if (next.prompts.continuation === legacyContinuation) next.prompts.continuation = builtin.prompts.continuation;
+  }
+  if (source.id === 'builtin-char-questionnaire' && next.prompts.continuation === legacyCharContinuation) {
+    next.prompts.continuation = builtin.prompts.continuation;
+  }
+  return next;
 }

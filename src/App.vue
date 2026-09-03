@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
-import BlockCard from './components/BlockCard.vue';
+import RecordPages from './components/RecordPages.vue';
 import ContentItemEditor from './components/ContentItemEditor.vue';
 import SettingsPanel from './components/SettingsPanel.vue';
 import TemplateEditor from './components/TemplateEditor.vue';
@@ -9,6 +9,7 @@ import { BUILTIN_TEMPLATES, cloneBuiltinTemplate } from './domain/defaults';
 import type { ContentItem, CowriteRecord, CowriteTemplate, InputConfig } from './domain/schema';
 import { useCowriteStore, type AppTab } from './stores/app';
 import { cloneJson } from './core/clone';
+import { isInputAnswered } from './domain/schema';
 
 const store = useCowriteStore();
 const {
@@ -33,7 +34,9 @@ const filteredRecords = computed(() => records.value.filter((record) => {
   if (templateFilter.value !== 'all' && record.templateId !== templateFilter.value) return false;
   return !dateFilter.value || record.updatedAt.slice(0, 10) >= dateFilter.value;
 }));
-const blockLabels = computed(() => new Map(selectedRecord.value?.blocks.map((block, index) => [block.id, block.title || block.input?.label || `卡片 ${index + 1}`]) || []));
+const canEditRecord = computed(() => canGenerate.value && selectedRecord.value?.characterId === characterId.value);
+const latestCycle = computed(() => [...(selectedRecord.value?.cycles || [])].reverse().find((cycle) => cycle.status === 'applied'));
+const moreLabel = computed(() => selectedRecord.value?.templateId === 'builtin-exchange-diary' ? '再写一页' : '生成更多题');
 
 let pointerId = -1;
 let dragStart = { x: 0, y: 0, left: 0, top: 0 };
@@ -182,8 +185,19 @@ function commitInput(blockId: string, value: InputConfig['value']): void {
   void store.commitInput(blockId, value);
 }
 
+async function reroll(): Promise<void> {
+  const answered = selectedRecord.value?.blocks.some((block) => block.cycleId === latestCycle.value?.id && block.kind === 'input' && isInputAnswered(block));
+  if (answered && !window.confirm('重roll会替换他最近一次生成的内容，其中新题目下你已填写的答案也会清除。更早的题目和答案会保留，是否继续？')) return;
+  await store.reroll();
+}
+
+async function clearAnswers(): Promise<void> {
+  if (!window.confirm('清空所有已填答案和后续评价，保留原题及他随题写好的答案，重新填写？')) return;
+  await store.clearAnswers();
+}
+
 function statusLabel(status: CowriteRecord['status']): string {
-  return status === 'active' ? '进行中' : status === 'completed' ? '已完成' : '已归档';
+  return status === 'active' ? '进行中' : status === 'completed' ? '已回应' : '历史记录';
 }
 
 function dateLabel(value: string): string {
@@ -233,30 +247,16 @@ function dateLabel(value: string): string {
                 <button class="cw-star" :class="{ active: selectedRecord.starred }" title="星标" @click="store.toggleRecordStar()">★</button>
               </header>
 
-              <div v-if="selectedRecord.blocks.length" class="cw-page-stack">
-                <BlockCard
-                  v-for="block in selectedRecord.blocks"
-                  :key="block.id"
-                  :block="block"
-                  :character-name="selectedRecord.characterName"
-                  :disabled="busy || selectedRecord.status !== 'active'"
-                  :target-labels="block.targetIds.map(id => blockLabels.get(id) || id)"
-                  @commit="commitInput"
-                />
-              </div>
+              <RecordPages v-if="selectedRecord.blocks.length" :blocks="selectedRecord.blocks" :character-name="selectedRecord.characterName" :disabled="!canEditRecord" @commit="commitInput" />
               <div v-else class="cw-empty"><span>📝</span><h3>这一页还是空的</h3><p>上次生成可能没有完成，可以重试或删除这份记录。</p></div>
 
               <footer class="cw-actionbar">
                 <button v-if="busy" class="cw-button cw-button--danger" @click="store.stopGeneration">停止生成</button>
-                <button v-else-if="selectedRecord.status === 'active'" class="cw-button cw-button--primary" :disabled="!canGenerate" @click="store.continueRecord()">{{ selectedRecord.blocks.length ? '继续写一轮' : '重试首轮' }}</button>
+                <button v-else class="cw-button cw-button--primary" :disabled="!canEditRecord" title="把已填好的内容交给他，让他接着回答或评价" @click="store.continueRecord()">交给他写</button>
                 <button v-if="unsyncedRecordIds.includes(selectedRecord.id)" class="cw-button cw-button--danger" @click="store.retrySync()">重试同步</button>
-                <button class="cw-button cw-button--quiet" :disabled="busy" @click="store.undo">撤销本轮</button>
-                <button class="cw-button cw-button--quiet" :disabled="busy" @click="store.redo">重做</button>
-                <button v-if="selectedRecord.status === 'active'" class="cw-button cw-button--quiet" @click="store.setRecordStatus('completed')">完成</button>
-                <button v-else-if="selectedRecord.status === 'completed'" class="cw-button cw-button--quiet" @click="store.setRecordStatus('active')">重新打开</button>
-                <button v-if="selectedRecord.status === 'archived'" class="cw-button cw-button--quiet" @click="store.setRecordStatus('active')">取消归档</button>
-                <button v-else class="cw-button cw-button--quiet" @click="store.setRecordStatus('archived')">归档</button>
-                <button class="cw-button cw-button--quiet" @click="store.nextVolume">下一卷</button>
+                <button class="cw-button cw-button--quiet" :disabled="!canEditRecord || !latestCycle" title="重新生成他最近一次写的内容，成功后替换；更早的内容保持不变" @click="reroll">重roll</button>
+                <button class="cw-button cw-button--quiet" :disabled="!canEditRecord || !selectedRecord.blocks.length" title="保留原题和他随题写好的答案，清空我的填写及后续回应" @click="clearAnswers">清空重填</button>
+                <button class="cw-button cw-button--quiet" :disabled="!canEditRecord" title="保留已有内容，在当前记录后追加新内容" @click="store.generateMore">{{ moreLabel }}</button>
               </footer>
             </template>
             <div v-else class="cw-welcome">
@@ -291,7 +291,7 @@ function dateLabel(value: string): string {
             <header class="cw-page-header"><div><span class="cw-kicker">ARCHIVE</span><h2>记录库</h2><p>{{ records.length }} 份独立记录；切换角色不会丢失。</p></div><div><button class="cw-small-btn" @click="recordImport?.click()">导入记录</button><input ref="recordImport" class="cw-hidden" type="file" accept="application/json,.json" @change="importRecordFile" /></div></header>
             <div class="cw-filters">
               <input v-model="query" class="cw-field" placeholder="搜索标题、角色或模板…" />
-              <select v-model="statusFilter" class="cw-field"><option value="all">全部状态</option><option value="active">进行中</option><option value="completed">已完成</option><option value="archived">已归档</option></select>
+              <select v-model="statusFilter" class="cw-field"><option value="all">全部状态</option><option value="active">进行中</option><option value="completed">已回应</option><option value="archived">历史记录</option></select>
               <select v-model="templateFilter" class="cw-field"><option value="all">全部模板</option><option v-for="template in templates" :key="template.id" :value="template.id">{{ template.name }}</option></select>
               <input v-model="dateFilter" class="cw-field" type="date" title="只看此日期及之后更新的记录" />
             </div>

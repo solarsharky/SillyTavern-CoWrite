@@ -2,13 +2,15 @@
 import { computed, ref, watch } from 'vue';
 import type { Block, InputConfig } from '../domain/schema';
 
-const props = defineProps<{ block: Block; characterName: string; disabled?: boolean; targetLabels?: string[] }>();
+const props = defineProps<{ block: Block; characterName: string; disabled?: boolean; targetLabels?: string[]; inline?: boolean }>();
 const emit = defineEmits<{ commit: [blockId: string, value: InputConfig['value']] }>();
 
 const draft = ref<InputConfig['value']>(cloneValue(props.block.input?.value ?? null));
 watch(() => props.block.input?.value, (value) => { draft.value = cloneValue(value ?? null); });
 
-const author = computed(() => props.block.author === 'char' ? props.characterName : props.block.author === 'user' ? 'User' : '共笔');
+const author = computed(() => props.block.kind === 'answer' ? `${props.characterName}的答案`
+  : props.block.kind === 'review' ? `${props.characterName}的评价`
+    : props.block.author === 'char' ? props.characterName : props.block.author === 'user' ? '我的答案' : '共笔');
 const cardClass = computed(() => `cw-block--${props.block.author} cw-block--${props.block.kind}`);
 const scaleValues = computed(() => {
   const min = props.block.input?.min ?? 1;
@@ -26,11 +28,12 @@ const inputQuestion = computed(() => {
 });
 
 function commit(): void {
-  if (!props.block.input) return;
+  if (!props.block.input || props.block.kind !== 'input' || props.disabled) return;
   emit('commit', props.block.id, cloneValue(draft.value));
 }
 
 function toggleMulti(option: string): void {
+  if (props.block.kind !== 'input' || props.disabled) return;
   const values = Array.isArray(draft.value) ? [...draft.value] : [];
   const index = values.indexOf(option);
   if (index >= 0) values.splice(index, 1);
@@ -47,19 +50,19 @@ function cloneValue(value: InputConfig['value']): InputConfig['value'] {
 <template>
   <div v-if="block.kind === 'divider'" class="cw-divider"><span>✦</span></div>
   <section v-else class="cw-block" :class="cardClass">
-    <header v-if="block.title || block.kind !== 'input'" class="cw-block__header">
+    <header class="cw-block__header">
       <span class="cw-block__author">{{ author }}</span>
       <h3 v-if="block.title">{{ block.title }}</h3>
     </header>
     <p v-if="block.content" class="cw-block__content">{{ block.content }}</p>
-    <div v-if="block.targetIds.length" class="cw-block__targets">
+    <div v-if="block.targetIds.length && !inline && block.kind !== 'answer'" class="cw-block__targets">
       ↳ 回应：{{ targetLabels?.join('、') || block.targetIds.join('、') }}
     </div>
 
-    <fieldset v-if="block.kind === 'input' && block.input" class="cw-input" :disabled="disabled">
+    <fieldset v-if="(block.kind === 'input' || block.kind === 'answer') && block.input" class="cw-input" :disabled="disabled || block.kind === 'answer'">
       <legend>
         {{ inputQuestion }}
-        <span v-if="block.input.required" class="cw-required">必填</span>
+        <span v-if="block.kind === 'input' && block.input.required" class="cw-required">必填</span>
       </legend>
 
       <input

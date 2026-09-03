@@ -86,9 +86,9 @@ export function recordToMarkdown(record: CowriteRecord): string {
     const heading = block.title || block.input?.label || authorLabel(block.author);
     lines.push(`## ${heading}`, '');
     if (block.content) lines.push(block.content, '');
-    if (block.kind === 'input' && block.input) {
+    if ((block.kind === 'input' || block.kind === 'answer') && block.input) {
       const value = block.input.value;
-      lines.push(`**User：** ${Array.isArray(value) ? value.join('、') : value ?? '（未填写）'}`, '');
+      lines.push(`**${block.kind === 'answer' ? record.characterName : 'User'}：** ${Array.isArray(value) ? value.join('、') : value ?? '（未填写）'}`, '');
     }
     if (block.targetIds.length) lines.push(`> 关联卡片：${block.targetIds.join(', ')}`, '');
   }

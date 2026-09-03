@@ -1,5 +1,5 @@
 import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS } from '../src/domain/defaults';
-import { SCHEMA_VERSION, type CowriteRecord, type CowriteSettings, type CowriteTemplate } from '../src/domain/schema';
+import { SCHEMA_VERSION, GenerationPatchSchema, type CowriteRecord, type CowriteSettings, type CowriteTemplate, type InputType, type InputConfig } from '../src/domain/schema';
 
 export function makeTemplate(overrides: Partial<CowriteTemplate> = {}): CowriteTemplate {
   return { ...structuredClone(BUILTIN_TEMPLATES[0]!), ...overrides };
@@ -29,4 +29,13 @@ export function makeRecord(overrides: Partial<CowriteRecord> = {}): CowriteRecor
 
 export function makeSettings(overrides: Partial<CowriteSettings> = {}): CowriteSettings {
   return { ...structuredClone(DEFAULT_SETTINGS), ...overrides };
+}
+
+export function makeQuestionPatch(type: InputType = 'short', answer: InputConfig['value'] = '一起散步') {
+  return GenerationPatchSchema.parse({
+    blocks: [
+      { key: 'q', kind: 'input', author: 'user', title: '第1题', input: { type, label: '你想怎么度过周末？', required: true, options: ['散步', '读书'], min: 1, max: 5 } },
+      { key: 'a', kind: 'answer', author: 'char', targetIds: ['q'], answer },
+    ],
+  });
 }
