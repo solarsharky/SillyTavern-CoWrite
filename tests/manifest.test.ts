@@ -10,6 +10,6 @@ describe('SillyTavern manifest 启动条件', () => {
 
   it('与酒馆助手 4.9.3 的最低 ST 版本保持兼容', () => {
     expect(manifest.minimum_client_version).toBe('1.12.13');
-    expect(manifest.version).toBe('0.1.0-beta.12');
+    expect(manifest.version).toBe('0.1.0-beta.13');
   });
 });

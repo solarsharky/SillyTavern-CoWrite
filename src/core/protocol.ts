@@ -34,8 +34,8 @@ export const PATCH_JSON_SCHEMA = {
           additionalProperties: false,
           properties: {
             key: { type: 'string' },
-            kind: { enum: ['section', 'text', 'input', 'answer', 'review', 'divider'] },
-            author: { enum: ['system', 'char', 'user'] },
+            kind: { type: 'string', enum: ['section', 'text', 'input', 'answer', 'review', 'divider'] },
+            author: { type: 'string', enum: ['system', 'char', 'user'] },
             title: { type: 'string' },
             content: { type: 'string' },
             targetIds: { type: 'array', items: { type: 'string' } },
@@ -44,7 +44,7 @@ export const PATCH_JSON_SCHEMA = {
               type: 'object',
               additionalProperties: false,
               properties: {
-                type: { enum: ['short', 'long', 'single', 'multi', 'scale'] },
+                type: { type: 'string', enum: ['short', 'long', 'single', 'multi', 'scale'] },
                 label: { type: 'string' },
                 placeholder: { type: 'string' },
                 required: { type: 'boolean' },

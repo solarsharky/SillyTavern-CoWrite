@@ -9501,8 +9501,8 @@ const jr = `你正在为“共笔”插件生成结构化卡片。必须遵守�
           additionalProperties: !1,
           properties: {
             key: { type: "string" },
-            kind: { enum: ["section", "text", "input", "answer", "review", "divider"] },
-            author: { enum: ["system", "char", "user"] },
+            kind: { type: "string", enum: ["section", "text", "input", "answer", "review", "divider"] },
+            author: { type: "string", enum: ["system", "char", "user"] },
             title: { type: "string" },
             content: { type: "string" },
             targetIds: { type: "array", items: { type: "string" } },
@@ -9511,7 +9511,7 @@ const jr = `你正在为“共笔”插件生成结构化卡片。必须遵守�
               type: "object",
               additionalProperties: !1,
               properties: {
-                type: { enum: ["short", "long", "single", "multi", "scale"] },
+                type: { type: "string", enum: ["short", "long", "single", "multi", "scale"] },
                 label: { type: "string" },
                 placeholder: { type: "string" },
                 required: { type: "boolean" },
@@ -12623,7 +12623,7 @@ const Hw = { class: "cw-settings" }, Gw = { class: "cw-paper-section" }, qw = { 
       ]),
       I[54] || (I[54] = p("section", { class: "cw-paper-section" }, [
         p("span", { class: "cw-kicker" }, "ABOUT"),
-        p("h2", null, "共笔 v0.1.0-beta.12"),
+        p("h2", null, "共笔 v0.1.0-beta.13"),
         p("p", null, "作者 SolarShark · MIT License"),
         p("a", {
           href: "https://github.com/solarsharky/SillyTavern-CoWrite/issues",

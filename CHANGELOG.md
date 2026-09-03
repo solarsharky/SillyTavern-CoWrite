@@ -2,6 +2,13 @@
 
 所有重要变更都会记录在这里。本项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## [0.1.0-beta.13] - 2026-09-03
+
+### Fixed
+
+- 为输出 JSON Schema 的 `input.type`、`kind` 和 `author` 枚举补齐显式字符串类型，修复 Moonshot 在生成前返回 `type is not defined` 并拒绝请求的问题。
+- 主生成与自动修复请求统一使用补全后的格式定义，保留各题型与 Char 答案的原有结构校验。
+
 ## [0.1.0-beta.12] - 2026-09-03
 
 ### Changed

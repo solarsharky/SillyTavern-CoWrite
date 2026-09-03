@@ -34,6 +34,31 @@ describe('生成网关', () => {
     expect(generateRaw.mock.calls[0]?.[0].ordered_prompts).toEqual(expect.arrayContaining(['world_info_before', 'world_info_after', 'chat_history']));
   });
 
+  it('主生成与自动修复请求的枚举字段都提供 Moonshot 所需的显式类型', async () => {
+    const { gateway, generateRaw } = setup([]);
+    let requests = 0;
+    generateRaw.mockImplementation(async (request) => {
+      const fields = request.json_schema.value.properties.blocks.items.properties;
+      for (const [path, field] of [
+        ['input.properties.type', fields.input.properties.type],
+        ['kind', fields.kind],
+        ['author', fields.author],
+      ] as const) {
+        // Reproduce the provider rejecting enum-only schemas before it generates output.
+        if (field.type !== 'string') {
+          throw new Error(`response_format.json_schema is not a valid moonshot flavored json schema, details: <At path 'properties.blocks.items.properties.${path}': type is not defined>`);
+        }
+        expect(field.enum.every((value: unknown) => typeof value === 'string')).toBe(true);
+      }
+      requests += 1;
+      return requests === 1 ? 'invalid-json' : JSON.stringify(makeQuestionPatch('scale', 4));
+    });
+    const patch = await gateway.generatePatch({ ...options(), template: makeTemplate() });
+    expect(generateRaw).toHaveBeenCalledTimes(2);
+    expect(patch.blocks[0]?.input?.type).toBe('scale');
+    expect(patch.blocks[1]?.answer).toBe(4);
+  });
+
   it('关闭历史聊天和世界书时不会加入对应提示词位置', async () => {
     const { gateway, generateRaw } = setup([valid]);
     const template = makeTemplate({ id: 'test-format', context: { ...makeTemplate().context, recentChatCount: 0, worldInfoMode: 'off' } });
